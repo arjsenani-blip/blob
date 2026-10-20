@@ -1,0 +1,25 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:">
+  <title>Blob's Brain</title>
+  <link rel="stylesheet" href="brain.css">
+</head>
+<body>
+  <aside>
+    <div class="brand"><canvas id="miniblob"></canvas><span>Blob's Brain</span></div>
+    <nav>
+      <button data-tab="today" class="on"><span>☀️</span>Today</button>
+      <button data-tab="calendar"><span>📅</span>Calendar</button>
+      <button data-tab="tasks"><span>✅</span>Assignments</button>
+      <button data-tab="settings"><span>⚙️</span>Settings</button>
+    </nav>
+    <div id="syncbadge" class="sync"></div>
+  </aside>
+  <main id="main"></main>
+  <div id="toast" class="toast hidden"></div>
+  <script src="blob.js"></script>
+  <script src="brain.js"></script>
+</body>
+</html>

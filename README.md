@@ -74,6 +74,23 @@ Blob's AI can never start an update by itself. The project folder has to stay in
 
 Blob is Mac-only. iPhones don't allow an app to control the rest of the phone.
 
+## Blob for Windows
+
+The `windows/` folder is the Windows version: the corner Blob plus the **Blob's Brain** planner. It uses the same synced data as the Mac and iPhone.
+
+- **Install:** run `Blob-Setup-1.0.0.exe`. The installer isn't code-signed, so Windows shows "Windows protected your PC" the first time. Click **More info → Run anyway**.
+- **Talk:** press **Ctrl+Shift+B** anywhere, or click Blob in the bottom-right corner. Right-click Blob to open Blob's Brain. Blob also lives in the system tray.
+- **Voice:** the first time you talk, Blob offers to download its offline voice and hearing (about 380 MB, one time). It uses the same Daniel voice as the Mac, and Moonshine for speech recognition, both running on your PC. Until then you can type, and Blob answers with Windows' built-in voice.
+- **Brain:** instant commands work offline: open apps and sites, YouTube, music, search, volume and media keys, timers, schedule, check-in, adding assignments and events. Everything else goes to **Claude Code on your Pro plan** (install Claude Code on the PC and sign in). Replies stream, so Blob starts talking right away.
+- **Sync:** in Settings, paste a **Desktop app** OAuth client ID and secret from the same Google Cloud project as your Mac, then sign in. Data syncs with the Mac and iPhone through the same hidden Drive file.
+- **Build it yourself:**
+
+  ```bash
+  cd windows && npm install && npm test && npm run dist
+  ```
+
+  This makes `windows/dist/Blob-Setup-1.0.0.exe`. It builds on a Mac too.
+
 ---
 
 ## 1. Install on your Mac

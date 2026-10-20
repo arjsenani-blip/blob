@@ -1,0 +1,38 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:">
+  <title>Blob</title>
+  <link rel="stylesheet" href="overlay.css">
+</head>
+<body>
+  <div id="panel">
+    <div id="bubble" class="hidden">
+      <div class="head">
+        <span class="dot"></span><span class="name">Blob</span><span id="phase" class="phase"></span>
+        <button id="close" title="Close (Esc)">✕</button>
+      </div>
+      <div id="heard" class="heard"></div>
+      <div id="status" class="status"></div>
+      <div id="reply" class="reply"></div>
+      <div id="download" class="download hidden">
+        <div>To hear you and talk back offline, Blob needs its voice and hearing models (<span id="dlsize">380</span> MB, one time).</div>
+        <div class="bar"><div id="dlbar"></div></div>
+        <div id="dllabel" class="dllabel"></div>
+        <button id="dlbtn" class="primary">Download</button>
+      </div>
+      <div class="input">
+        <input id="typed" placeholder="Type to Blob…" autocomplete="off" spellcheck="false">
+        <button id="mic" title="Talk (Ctrl+Shift+B)">🎙</button>
+      </div>
+    </div>
+    <div id="blobwrap" title="Click or Ctrl+Shift+B to talk">
+      <canvas id="blob"></canvas>
+      <div id="hint" class="hint hidden">Click or Ctrl+Shift+B</div>
+    </div>
+  </div>
+  <script src="blob.js"></script>
+  <script src="overlay.js"></script>
+</body>
+</html>
