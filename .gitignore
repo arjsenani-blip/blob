@@ -15,3 +15,4 @@ xcuserdata/
 # Windows app
 windows/node_modules/
 windows/dist/
+*.exe
