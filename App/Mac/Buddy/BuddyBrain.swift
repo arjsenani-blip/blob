@@ -1,14 +1,14 @@
 import AppKit
 import BrainCore
 
-/// Which brain answers. Default is on-device: free, private, works offline.
+/// Which brain answers. Default is "Smart": on-device for actions, Claude (Pro plan) for knowledge or when unsure.
 enum BuddyBrainMode: String, CaseIterable, Identifiable {
     case onDevice, claudePro, claudeAPI
     var id: String { rawValue }
     var label: String {
         switch self {
-        case .onDevice: return "On-device · free, private, works offline"
-        case .claudePro: return "Claude on your Pro plan · no extra cost, needs internet"
+        case .onDevice: return "Smart · on-device, asks Claude (Pro plan) when needed"
+        case .claudePro: return "Always Claude on your Pro plan · needs internet"
         case .claudeAPI: return "Claude API · paid per use, adds screen vision"
         }
     }
@@ -17,7 +17,7 @@ enum BuddyBrainMode: String, CaseIterable, Identifiable {
     }
 }
 
-/// Routes a request: instant local commands first (free, offline), then the chosen brain.
+/// Routes a request: instant local commands first (free, offline), then the on-device model or Claude.
 @MainActor
 final class BuddyBrain {
     let tools: BuddyTools
@@ -43,9 +43,9 @@ final class BuddyBrain {
 
     var activeDescription: String {
         switch BuddyBrainMode.current {
-        case .onDevice: return OnDeviceBrain.isAvailable ? "On-device" : "Basic commands"
+        case .onDevice: return OnDeviceBrain.isAvailable ? "Smart (on-device + Claude)" : "Claude (Pro plan)"
         case .claudePro: return "Claude (Pro plan)"
-        case .claudeAPI: return Self.apiKey.isEmpty ? "On-device (no API key)" : "Claude API"
+        case .claudeAPI: return Self.apiKey.isEmpty ? "Smart (no API key)" : "Claude API"
         }
     }
 
@@ -55,13 +55,20 @@ final class BuddyBrain {
         onDevice.reset()
     }
 
-    func respond(to text: String) async -> String {
+    /// Called the moment you start talking: warm both brains so the answer comes back faster.
+    func prewarm() {
+        onDevice.prewarm()
+        if BuddyBrainMode.current != .claudeAPI { claudePro.warmUp() }
+    }
+
+    /// `onPartial` receives Claude's answer as it streams in (so Blob can start speaking early).
+    func respond(to text: String, onPartial: @escaping (String) -> Void = { _ in }) async -> String {
         if let quick = await LocalCommands.handle(text, tools: tools) { return quick }
 
-        // "Ask Claude …" / "think harder …" sends just this one to Claude on the Pro plan.
+        // "Ask Claude …" / "think harder …" always goes to Claude.
         if let r = text.range(of: #"^(?:hey blob,? )?(?:ask claude|think (?:harder|hard) about|think harder)[,:]? *"#, options: [.regularExpression, .caseInsensitive]) {
             let q = String(text[r.upperBound...])
-            if let answer = try? await claudePro.respond(to: q.isEmpty ? text : q) { return answer }
+            if let answer = try? await askClaude(q.isEmpty ? text : q, onPartial: onPartial) { return answer }
         }
 
         switch BuddyBrainMode.current {
@@ -72,20 +79,59 @@ final class BuddyBrain {
                 return error.localizedDescription
             }
         case .claudePro:
-            tools.onStatus("Asking Claude…")
-            do { return try await claudePro.respond(to: text) }
+            do { return try await askClaude(text, onPartial: onPartial) }
             catch {
-                // Offline? The on-device brain still works.
-                if OnDeviceBrain.isAvailable, let r = try? await onDevice.respond(to: text) { return r }
+                if OnDeviceBrain.isAvailable, let r = try? await onDevice.respond(to: text) { return r }   // offline
                 return error.localizedDescription
             }
         default:
-            if OnDeviceBrain.isAvailable {
-                do { return try await onDevice.respond(to: text) }
-                catch { return "My apologies, sir, I couldn't work that one out on-device. Say \"ask Claude\" before it to use your Pro plan." }
-            }
-            return "I can open apps and websites, play YouTube and music, search the web, control volume, set timers and check your schedule, sir. For open-ended questions, turn on Apple Intelligence in System Settings."
+            return await smart(text, onPartial: onPartial)
         }
+    }
+
+    /// Smart routing: actions stay on-device (fast, private); knowledge questions, writing help and anything the
+    /// on-device model is unsure about go to Claude on the Pro plan.
+    private func smart(_ text: String, onPartial: @escaping (String) -> Void) async -> String {
+        let claudeReady = await ClaudeCodeBrain.findClaude() != nil
+        if claudeReady, Self.needsClaude(text) {
+            if let answer = try? await askClaude(text, onPartial: onPartial) { return answer }
+        }
+        if OnDeviceBrain.isAvailable {
+            tools.onStatus("Thinking…")
+            let answer = try? await onDevice.respond(to: text)
+            if let answer, !Self.soundsUnsure(answer, question: text) { return answer }
+            if claudeReady {
+                tools.onStatus("Checking with Claude…")
+                if let better = try? await askClaude(text, onPartial: onPartial) { return better }
+            }
+            if let answer { return answer }
+            return "My apologies, sir, I couldn't work that one out."
+        }
+        if claudeReady, let answer = try? await askClaude(text, onPartial: onPartial) { return answer }
+        return "I can open apps and websites, play YouTube and music, search the web, control volume, set timers and check your schedule, sir."
+    }
+
+    private func askClaude(_ text: String, onPartial: @escaping (String) -> Void) async throws -> String {
+        tools.onStatus("Asking Claude…")
+        return try await claudePro.respond(to: text, onPartial: onPartial)
+    }
+
+    /// Open-ended questions, explanations, writing and anything current — better answered by Claude.
+    static func needsClaude(_ text: String) -> Bool {
+        let t = text.lowercased()
+        let action = #"^(?:please |can you |could you )?(open|launch|quit|close|play|pause|skip|set|turn|mute|unmute|add|remind|schedule|check|mark|complete|type|press|click|scroll|find my|search my|read my|show me my|start|stop|go to|volume|timer)\b"#
+        if t.range(of: action, options: .regularExpression) != nil { return false }
+        let knowledge = #"\b(why|how (do|does|did|can|would|should|is|are|to)|explain|what (is|are|was|were|does|did|causes|happens)|who (is|was|were)|when (did|was|is)|compare|difference between|summari[sz]e|write|draft|essay|paragraph|thesis|outline|solve|calculate|derivative|integral|equation|proof|translate|define|meaning of|tell me about|history of|news|weather|score|latest|today's|recommend|ideas for|help me (with|understand|study)|quiz me|practice question)\b"#
+        return t.range(of: knowledge, options: .regularExpression) != nil || t.split(separator: " ").count > 18
+    }
+
+    /// Hedging, refusals or non-answers from the on-device model → hand the question to Claude.
+    static func soundsUnsure(_ answer: String, question: String) -> Bool {
+        let a = answer.lowercased()
+        let hedges = #"\b(i'?m not sure|i am not sure|not certain|i don'?t know|i do not know|i can'?t (help|answer|do|access|provide)|i cannot|i'?m unable|i am unable|unable to (help|answer|provide|find)|as an ai|i don'?t have (access|information|enough)|could you (clarify|rephrase|provide more)|can you (clarify|rephrase)|i'?m sorry, but|beyond my|outside my|no information)\b"#
+        if a.range(of: hedges, options: .regularExpression) != nil { return true }
+        if a.trimmingCharacters(in: .whitespacesAndNewlines).count < 12 && question.split(separator: " ").count > 5 { return true }
+        return false
     }
 
     /// Context prepended to each message (kept out of the system prompt so prompt caching stays effective).
@@ -120,26 +166,36 @@ final class BuddyBrain {
 
 // MARK: - Claude on the user's Pro plan, through Claude Code (no API charges)
 
+/// Keeps one Claude Code session running in the background (no start-up cost per question) and streams
+/// the answer token by token, so Blob can start talking before Claude has finished writing.
 @MainActor
 final class ClaudeCodeBrain {
     let tools: BuddyTools
-    private var sessionID: String?
+    private var process: Process?
+    private var stdin: FileHandle?
+    private var buffer = Data()
     private var lastActivity = Date.distantPast
+    private var current: (cont: CheckedContinuation<String, Error>, text: String, onPartial: (String) -> Void)?
+    private var turnTimeout: Task<Void, Never>?
 
     init(tools: BuddyTools) { self.tools = tools }
 
-    func reset() { sessionID = nil }
+    func reset() { stopProcess() }
 
     static func findClaude() async -> String? {
+        if let cached = cachedPath { return cached }
         let out = await BuddyTools.runProcess("/bin/zsh", ["-lc", "command -v claude"], timeout: 10)
             .trimmingCharacters(in: .whitespacesAndNewlines)
-        if !out.isEmpty, FileManager.default.isExecutableFile(atPath: out) { return out }
-        for p in ["~/.local/bin/claude", "~/.claude/local/claude", "/opt/homebrew/bin/claude", "/usr/local/bin/claude"] {
+        var found: String?
+        if !out.isEmpty, FileManager.default.isExecutableFile(atPath: out) { found = out }
+        for p in ["~/.local/bin/claude", "~/.claude/local/claude", "/opt/homebrew/bin/claude", "/usr/local/bin/claude"] where found == nil {
             let path = (p as NSString).expandingTildeInPath
-            if FileManager.default.isExecutableFile(atPath: path) { return path }
+            if FileManager.default.isExecutableFile(atPath: path) { found = path }
         }
-        return nil
+        cachedPath = found
+        return found
     }
+    private static var cachedPath: String?
 
     enum CodeError: LocalizedError {
         case notInstalled, failed(String)
@@ -151,30 +207,113 @@ final class ClaudeCodeBrain {
         }
     }
 
-    func respond(to text: String) async throws -> String {
-        guard let claude = await Self.findClaude() else { throw CodeError.notInstalled }
-        if Date().timeIntervalSince(lastActivity) > 15 * 60 { sessionID = nil }
-        lastActivity = Date()
+    /// Start the background session ahead of time (called when you start talking).
+    func warmUp() {
+        Task { _ = await ensureProcess() }
+    }
 
-        // An empty working folder, so this mode can only talk and search the web — it never touches files.
+    func respond(to text: String, onPartial: @escaping (String) -> Void = { _ in }) async throws -> String {
+        // A fresh conversation after a long break.
+        if Date().timeIntervalSince(lastActivity) > 15 * 60 { stopProcess() }
+        lastActivity = Date()
+        guard await ensureProcess(), let stdin else { throw CodeError.notInstalled }
+        if let busy = current { current = nil; busy.cont.resume(throwing: CodeError.failed("Interrupted.")) }
+
+        let message: [String: Any] = ["type": "user", "message": ["role": "user", "content": [["type": "text", "text": BuddyBrain.context(tools: tools) + "\n" + text]]]]
+        guard let line = try? JSONSerialization.data(withJSONObject: message) else { throw CodeError.failed("Bad request.") }
+
+        return try await withCheckedThrowingContinuation { cont in
+            current = (cont, "", onPartial)
+            stdin.write(line + Data("\n".utf8))
+            turnTimeout?.cancel()
+            turnTimeout = Task {
+                try? await Task.sleep(for: .seconds(90))
+                guard !Task.isCancelled, let c = self.current else { return }
+                self.current = nil
+                c.cont.resume(throwing: CodeError.failed("It took too long."))
+                self.stopProcess()
+            }
+        }
+    }
+
+    private func ensureProcess() async -> Bool {
+        if process?.isRunning == true { return true }
+        guard let claude = await Self.findClaude() else { return false }
+        if process?.isRunning == true { return true }
+
+        // An empty working folder: this mode can only talk and search the web — it never touches your files.
         let dir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("ArjunsBrain/ClaudeChat", isDirectory: true)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let system = BuddyBrain.persona + " In this mode you can't operate the Mac; if asked to, tell them to ask it as a direct command, like \"open YouTube\". Use web search for anything current. Answer directly — no preamble."
 
-        let prompt = BuddyBrain.context(tools: tools) + "\n" + text
-        let system = BuddyBrain.persona + " In this mode you can't operate the Mac; if asked to, tell them to ask it as a direct command, like \"open YouTube\". Use web search for anything current."
+        let p = Process()
+        p.executableURL = URL(fileURLWithPath: "/bin/zsh")
         func quote(_ s: String) -> String { "'" + s.replacingOccurrences(of: "'", with: "'\\''") + "'" }
-        var cmd = "cd \(quote(dir.path)) && \(quote(claude)) -p \(quote(prompt)) --output-format json --append-system-prompt \(quote(system)) --allowedTools WebSearch WebFetch --max-turns 6"
-        if let sessionID { cmd += " --resume \(quote(sessionID))" }
-
-        let out = await BuddyTools.runProcess("/bin/zsh", ["-lc", cmd], timeout: 120)
-        guard let start = out.firstIndex(of: "{"),
-              let json = try? JSONSerialization.jsonObject(with: Data(out[start...].utf8)) as? [String: Any] else {
-            throw CodeError.failed(out.isEmpty ? "No response." : String(out.suffix(160)))
+        var cmd = "cd " + quote(dir.path) + " && exec " + quote(claude) + " -p --input-format stream-json --output-format stream-json"
+        cmd += " --verbose --include-partial-messages --model sonnet --append-system-prompt " + quote(system)
+        cmd += " --allowedTools WebSearch WebFetch --disallowedTools Bash Edit Write Read Glob Grep"
+        p.arguments = ["-lc", cmd]
+        let inPipe = Pipe(), outPipe = Pipe()
+        p.standardInput = inPipe
+        p.standardOutput = outPipe
+        p.standardError = FileHandle(forWritingAtPath: "/dev/null")
+        outPipe.fileHandleForReading.readabilityHandler = { h in
+            let data = h.availableData
+            Task { @MainActor in self.received(data) }
         }
-        if let id = json["session_id"] as? String { sessionID = id }
-        let result = (json["result"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-        if json["is_error"] as? Bool == true || result.isEmpty { throw CodeError.failed(result) }
-        return result
+        p.terminationHandler = { _ in Task { @MainActor in self.processEnded() } }
+        do { try p.run() } catch { return false }
+        process = p
+        stdin = inPipe.fileHandleForWriting
+        return true
+    }
+
+    private func received(_ data: Data) {
+        guard !data.isEmpty else { return }
+        buffer.append(data)
+        while let nl = buffer.firstIndex(of: 0x0A) {
+            let line = buffer.subdata(in: buffer.startIndex..<nl)
+            buffer.removeSubrange(buffer.startIndex...nl)
+            guard let json = try? JSONSerialization.jsonObject(with: line) as? [String: Any] else { continue }
+            switch json["type"] as? String {
+            case "stream_event":
+                // Token-by-token text from Claude.
+                if let event = json["event"] as? [String: Any], event["type"] as? String == "content_block_delta",
+                   let delta = event["delta"] as? [String: Any], delta["type"] as? String == "text_delta",
+                   let piece = delta["text"] as? String, var c = current {
+                    c.text += piece
+                    current = c
+                    c.onPartial(c.text)
+                }
+            case "result":
+                guard let c = current else { continue }
+                current = nil
+                turnTimeout?.cancel()
+                let final = (json["result"] as? String ?? c.text).trimmingCharacters(in: .whitespacesAndNewlines)
+                if json["is_error"] as? Bool == true || final.isEmpty {
+                    c.cont.resume(throwing: CodeError.failed(final))
+                } else {
+                    c.cont.resume(returning: final)
+                }
+            default:
+                break
+            }
+        }
+    }
+
+    private func processEnded() {
+        process = nil
+        stdin = nil
+        buffer = Data()
+        if let c = current {
+            current = nil
+            c.cont.resume(throwing: CodeError.failed("Claude stopped."))
+        }
+    }
+
+    private func stopProcess() {
+        process?.terminate()
+        processEnded()
     }
 }
 

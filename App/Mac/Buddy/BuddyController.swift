@@ -28,6 +28,7 @@ final class BuddyController: ObservableObject {
     @Published var typed = ""
     /// True when the bubble's text box is asking for a change to Blob itself.
     @Published var updateMode = false
+    private var streamingReply = false
     /// Where the mouse is relative to Blob's eyes (-1…1), so it can look at your cursor.
     @Published var look = CGPoint.zero
     /// Bubble frame in panel coordinates (top-left origin), for click-through hit testing.
@@ -234,6 +235,7 @@ final class BuddyController: ObservableObject {
                 reply = ""
                 withAnimation(.spring(duration: 0.4)) { phase = .listening; showBubble = true }
                 NSSound(named: "Tink")?.play()
+                brain?.prewarm()          // load the models while you talk
                 try speechIn.start()
             } catch {
                 show(reply: error.localizedDescription, error: true)
@@ -279,10 +281,34 @@ final class BuddyController: ObservableObject {
         }
         withAnimation(.spring(duration: 0.4)) { phase = .thinking; showBubble = true }
         work?.cancel()
+        streamingReply = false
+        let speakOn = UserDefaults.standard.object(forKey: "buddySpeak") as? Bool ?? true
         work = Task {
-            let answer = await brain.respond(to: text)
+            let answer = await brain.respond(to: text) { [weak self] partial in
+                // Claude's answer streams in: show it and start speaking right away.
+                guard let self, self.work?.isCancelled == false else { return }
+                if !self.streamingReply {
+                    self.streamingReply = true
+                    self.status = ""
+                    withAnimation(.spring(duration: 0.3)) { self.phase = .speaking }
+                    if speakOn { self.speechOut.beginStream() }
+                }
+                self.reply = partial
+                if speakOn { self.speechOut.streamUpdate(partial) }
+            }
             guard !Task.isCancelled else { return }
-            self.say(answer)
+            if self.streamingReply {
+                self.reply = answer
+                if speakOn {
+                    self.speechOut.endStream(finalText: answer)
+                } else {
+                    self.phase = .awake
+                    self.celebrate()
+                    self.scheduleHide()
+                }
+            } else {
+                self.say(answer)
+            }
         }
     }
 
@@ -360,6 +386,7 @@ final class BuddyController: ObservableObject {
     }
 
     func startTyping() {
+        brain?.prewarm()
         rememberTargetApp()
         hideTask?.cancel()
         withAnimation(.spring(duration: 0.4)) { showBubble = true; if phase == .resting { phase = .awake } }

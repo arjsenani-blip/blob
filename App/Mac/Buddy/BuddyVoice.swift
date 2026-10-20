@@ -145,20 +145,67 @@ final class SpeechOutput: NSObject, ObservableObject, AVSpeechSynthesizerDelegat
         return bestBritishVoice ?? AVSpeechSynthesisVoice(language: "en-GB")
     }
 
+    // MARK: Speaking — a sentence queue, so text can stream in while Blob is already talking.
+
+    private var queue: [String] = []
+    private var streamOpen = false
+    private var consumed = 0
+
+    /// Speak a whole reply.
     func speak(_ text: String) {
+        beginStream()
+        endStream(finalText: text)
+    }
+
+    /// Start talking as soon as the first sentence of a streaming reply is ready.
+    func beginStream() {
         stop()
-        let clean = text
-            .replacingOccurrences(of: #"\*\*|__|`|#+ "#, with: "", options: .regularExpression)
-            .replacingOccurrences(of: #"https?://\S+"#, with: "the link", options: .regularExpression)
         isSpeaking = true
+        streamOpen = true
+        consumed = 0
+        queue = []
         pulse = Timer.scheduledTimer(withTimeInterval: 0.06, repeats: true) { [weak self] _ in
             Task { @MainActor in self?.updateLevel() }
         }
-        if NaturalVoice.isEnabled {
-            speakTask = Task { await speakNaturally(clean) }
-        } else {
-            speakWithApple(clean)
+        speakTask = Task { await runQueue() }
+    }
+
+    /// `text` is everything received so far; any newly completed sentences are queued.
+    func streamUpdate(_ text: String) {
+        guard streamOpen else { return }
+        let chars = Array(text)
+        var i = consumed
+        while i < chars.count {
+            let c = chars[i]
+            let atBoundary = (c == "." || c == "!" || c == "?" || c == "…") && i + 1 < chars.count && chars[i + 1] == " "
+            // The very first chunk can end at a comma, so speech starts sooner.
+            let firstClause = queue.isEmpty && consumed == 0 && c == "," && i - consumed > 45 && i + 1 < chars.count && chars[i + 1] == " "
+            if atBoundary || firstClause {
+                enqueue(String(chars[consumed...i]))
+                consumed = i + 1
+            }
+            i += 1
         }
+    }
+
+    /// The reply is complete: queue whatever is left.
+    func endStream(finalText: String) {
+        guard streamOpen else { return }
+        let chars = Array(finalText)
+        if consumed < chars.count {
+            for sentence in NaturalVoice.sentences(String(chars[consumed...])) { enqueue(sentence) }
+        }
+        consumed = chars.count
+        streamOpen = false
+    }
+
+    private func enqueue(_ raw: String) {
+        let clean = raw
+            .replacingOccurrences(of: #"\*\*|__|`|#+ "#, with: "", options: .regularExpression)
+            .replacingOccurrences(of: #"https?://\S+"#, with: "the link", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !clean.isEmpty else { return }
+        queue.append(clean)
     }
 
     private func speakWithApple(_ text: String) {
@@ -167,37 +214,49 @@ final class SpeechOutput: NSObject, ObservableObject, AVSpeechSynthesizerDelegat
         // Calm, measured butler delivery.
         u.rate = AVSpeechUtteranceDefaultSpeechRate * 0.98
         u.pitchMultiplier = 0.94
-        u.preUtteranceDelay = 0.05
         synth.speak(u)
     }
 
-    /// Kokoro, sentence by sentence: the next sentence renders while the current one plays.
-    private func speakNaturally(_ text: String) async {
-        let sentences = NaturalVoice.sentences(text)
+    /// Plays queued sentences in order. The next sentence renders while the current one plays.
+    private func runQueue() async {
+        let engine = VoiceEngine.effective
+        let natural = engine != .apple && NaturalVoice.isEnabled
         let sid = NaturalVoice.speakerID
-        let useChatterbox = VoiceEngine.effective == .chatterbox
-        // Chatterbox when it's loaded; otherwise (or if a sentence fails) Kokoro.
         func makeJob(_ s: String) -> Task<URL?, Never> {
             Task {
-                if useChatterbox, let url = await ChatterboxServer.shared.render(s) { return url }
+                if engine == .chatterbox, let url = await ChatterboxServer.shared.render(s) { return url }
                 return await NaturalVoice.render(s, speaker: sid)
             }
         }
-        var pending: Task<URL?, Never>? = sentences.first.map(makeJob)
-        for i in sentences.indices {
-            guard !Task.isCancelled, let job = pending else { return }
-            let url = await job.value
-            pending = i + 1 < sentences.count ? makeJob(sentences[i + 1]) : nil
-            guard !Task.isCancelled else { return }
-            guard let url, let p = try? AVAudioPlayer(contentsOf: url) else {
-                // Fall back to Apple's voice for whatever is left.
-                speakWithApple(sentences[i...].joined(separator: " "))
-                return
+        var prefetched: (text: String, job: Task<URL?, Never>)?
+
+        while !Task.isCancelled {
+            guard !queue.isEmpty else {
+                if !streamOpen { break }
+                try? await Task.sleep(for: .milliseconds(40))
+                continue
             }
-            p.isMeteringEnabled = true
-            player = p
-            p.play()
-            while p.isPlaying, !Task.isCancelled { try? await Task.sleep(for: .milliseconds(40)) }
+            let sentence = queue.removeFirst()
+            if !natural {
+                speakWithApple(sentence)
+                while synth.isSpeaking, !Task.isCancelled { try? await Task.sleep(for: .milliseconds(40)) }
+                continue
+            }
+            let job = prefetched?.text == sentence ? prefetched!.job : makeJob(sentence)
+            prefetched = queue.first.map { ($0, makeJob($0)) }
+            guard let url = await job.value, !Task.isCancelled else {
+                if !Task.isCancelled {
+                    speakWithApple(sentence)       // fall back for this sentence
+                    while synth.isSpeaking, !Task.isCancelled { try? await Task.sleep(for: .milliseconds(40)) }
+                }
+                continue
+            }
+            if let p = try? AVAudioPlayer(contentsOf: url) {
+                p.isMeteringEnabled = true
+                player = p
+                p.play()
+                while p.isPlaying, !Task.isCancelled { try? await Task.sleep(for: .milliseconds(40)) }
+            }
             try? FileManager.default.removeItem(at: url)
         }
         if !Task.isCancelled { finish() }
@@ -220,6 +279,8 @@ final class SpeechOutput: NSObject, ObservableObject, AVSpeechSynthesizerDelegat
     func stop() {
         speakTask?.cancel()
         speakTask = nil
+        queue = []
+        streamOpen = false
         player?.stop()
         player = nil
         if synth.isSpeaking { synth.stopSpeaking(at: .immediate) }

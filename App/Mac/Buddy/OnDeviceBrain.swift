@@ -31,6 +31,16 @@ final class OnDeviceBrain {
 
     func reset() { session = nil }
 
+    /// Load the on-device model ahead of time (called when you start talking), so the reply starts faster.
+    func prewarm() {
+        guard Self.isAvailable else { return }
+        if session == nil || Date().timeIntervalSince(lastActivity) > 10 * 60 {
+            session = makeSession()
+            lastActivity = Date()
+        }
+        session?.prewarm()
+    }
+
     func respond(to text: String) async throws -> String {
         if session == nil || Date().timeIntervalSince(lastActivity) > 10 * 60 {
             session = makeSession()
