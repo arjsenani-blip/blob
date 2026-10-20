@@ -8,7 +8,7 @@ options:
 settings:
   base:
     SWIFT_VERSION: "5.0"
-    MARKETING_VERSION: "1.0"
+    MARKETING_VERSION: "1.1"
     CURRENT_PROJECT_VERSION: "1"
     DEVELOPMENT_TEAM: 849KV8NKVN
     PRODUCT_BUNDLE_IDENTIFIER: com.arjunsenani.brain
@@ -36,7 +36,8 @@ targets:
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         LSApplicationCategoryType: public.app-category.productivity
-        NSCalendarsFullAccessUsageDescription: Shows your Apple Calendar events alongside your plan so homework isn't scheduled on top of them.
+        NSCalendarsFullAccessUsageDescription: Shows your calendar events alongside your plan so homework isn't scheduled on top of them, and adds Blob's events to a Blob calendar.
+        NSRemindersFullAccessUsageDescription: Puts your assignments in a Blob list so they show up as tasks in Calendar and Reminders, and marks them done when you tick them off there.
         NSHumanReadableCopyright: Made for Arjun
         BlobSourceRoot: $(SRCROOT)
         NSMicrophoneUsageDescription: Blob listens when you click it or press its shortcut, so you can talk to it.
@@ -71,7 +72,8 @@ targets:
           UIApplicationSupportsMultipleScenes: false
         UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait, UIInterfaceOrientationLandscapeLeft, UIInterfaceOrientationLandscapeRight]
         UISupportedInterfaceOrientations~ipad: [UIInterfaceOrientationPortrait, UIInterfaceOrientationPortraitUpsideDown, UIInterfaceOrientationLandscapeLeft, UIInterfaceOrientationLandscapeRight]
-        NSCalendarsFullAccessUsageDescription: Shows your Apple Calendar events alongside your plan so homework isn't scheduled on top of them.
+        NSCalendarsFullAccessUsageDescription: Shows your calendar events alongside your plan so homework isn't scheduled on top of them, and adds Blob's events to a Blob calendar.
+        NSRemindersFullAccessUsageDescription: Puts your assignments in a Blob list so they show up as tasks in Calendar and Reminders, and marks them done when you tick them off there.
         ITSAppUsesNonExemptEncryption: false
         NSMicrophoneUsageDescription: Blob listens when you tap it, so you can talk to it.
         NSSpeechRecognitionUsageDescription: Blob turns what you say into text, on your iPhone.

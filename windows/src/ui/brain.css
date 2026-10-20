@@ -89,3 +89,22 @@ h2 { font-size: 19px; margin: 0 0 10px; }
 .seg { display: inline-flex; background: var(--line); border-radius: 8px; padding: 2px; }
 .seg button { border: 0; background: transparent; color: var(--text); padding: 4px 12px; border-radius: 6px; }
 .seg button.on { background: var(--card); box-shadow: 0 1px 3px rgba(0,0,0,.15); }
+
+.long { padding: 10px 0; border-bottom: 1px solid var(--line); cursor: pointer; display: grid; gap: 6px; }
+.long:last-child { border-bottom: 0; }
+.pbar { position: relative; height: 7px; border-radius: 4px; background: color-mix(in srgb, var(--c) 15%, transparent); }
+.pbar > div { height: 100%; border-radius: 4px; background: var(--c); transition: width .3s; }
+.pbar > span { position: absolute; top: -2px; width: 2px; height: 11px; background: var(--text); opacity: .45; }
+.stepsbar { display: flex; gap: 3px; } .stepsbar i { flex: 1; height: 4px; border-radius: 2px; }
+.workload { position: relative; display: grid; grid-template-columns: repeat(14, 1fr); gap: 6px; height: 140px; margin-top: 12px; padding-bottom: 18px; }
+.workload .goal { position: absolute; left: 0; right: 0; border-top: 1px dashed var(--muted); margin-bottom: 18px; }
+.wbar { display: flex; flex-direction: column; justify-content: flex-end; align-items: center; height: 100%; position: relative; }
+.wbar > div { width: 100%; border-radius: 4px 4px 0 0; min-height: 2px; }
+.wbar > span { position: absolute; bottom: -18px; font-size: 10px; color: var(--muted); }
+#detail { position: fixed; inset: 0; background: rgba(0,0,0,.35); display: flex; justify-content: flex-end; z-index: 10; }
+#detail .sheet { width: min(600px, 100%); height: 100%; overflow-y: auto; background: var(--bg); padding: 20px; display: grid; gap: 14px; align-content: start; box-shadow: -10px 0 30px rgba(0,0,0,.2); }
+.ring { width: 72px; height: 72px; border-radius: 50%; flex: none; display: grid; place-items: center;
+  background: radial-gradient(closest-side, var(--card) 76%, transparent 78% 100%), conic-gradient(var(--c) calc(var(--p) * 1%), color-mix(in srgb, var(--c) 15%, transparent) 0); }
+.ring span { font-weight: 800; font-size: 17px; }
+.stepname { border: 0; background: transparent; font: inherit; font-weight: 600; min-width: 0; }
+details summary { cursor: pointer; color: var(--muted); }

@@ -23,18 +23,21 @@ function event(fields) {
   return { id: newId(), isAllDay: false, recurrence: { frequency: 'none', weekdays: [] }, excludedDays: [], updatedAt: new Date(), deleted: false, ...fields };
 }
 function task(fields) {
-  return { id: newId(), estimatedMinutes: 30, difficulty: 2, priority: 1, source: 'manual', isCompleted: false, estimateIsUserSet: false, updatedAt: new Date(), deleted: false, due: null, ...fields };
+  return { id: newId(), estimatedMinutes: 30, difficulty: 2, priority: 1, source: 'manual', isCompleted: false, estimateIsUserSet: false,
+           createdAt: new Date(), milestones: [], sessions: [], isLate: false, updatedAt: new Date(), deleted: false, due: null, ...fields };
 }
 
 // ---- JSON (Swift Codable) <-> JS ----
 
 const DATE_FIELDS = {
-  event: ['start', 'end', 'updatedAt'], task: ['due', 'completedAt', 'updatedAt'],
+  event: ['start', 'end', 'updatedAt'], task: ['due', 'completedAt', 'updatedAt', 'startDate', 'createdAt'],
+  milestone: ['due', 'doneAt'], session: ['date'],
   block: ['start', 'end', 'startedAt'], plan: ['checkInAt', 'windowEnd', 'updatedAt'], settings: ['updatedAt'],
 };
 // JS dates hold milliseconds; the Swift apps store microseconds. Keep the exact original value for any date
 // that hasn't changed, so the Windows app never rewrites synced data it didn't touch.
 const precise = new WeakMap();
+const hadTracking = new WeakMap();
 function dec(o, kind) {
   const r = { ...o };
   const exact = {};
@@ -69,7 +72,14 @@ function decodeDoc(json) {
       if (r.recurrence.until != null) r.recurrence.until = fromSwift(r.recurrence.until);
       return r;
     }),
-    tasks: (d.tasks || []).map(t => dec(t, 'task')),
+    tasks: (d.tasks || []).map(t => {
+      const r = dec(t, 'task');
+      r.milestones = (t.milestones || []).map(m => dec(m, 'milestone'));
+      r.sessions = (t.sessions || []).map(x => dec(x, 'session'));
+      r.isLate = !!t.isLate;
+      hadTracking.set(r, 'milestones' in t);
+      return r;
+    }),
     plans: (d.plans || []).map(p => { const r = dec(p, 'plan'); r.blocks = (p.blocks || []).map(b => dec(b, 'block')); return r; }),
     settings: d.settings ? dec(d.settings, 'settings') : defaultSettings(),
   };
@@ -92,7 +102,16 @@ function encodeDoc(doc) {
       r.recurrence = rec;
       return r;
     }),
-    tasks: doc.tasks.map(t => enc(t, 'task')),
+    tasks: doc.tasks.map(t => {
+      const r = enc(t, 'task');
+      // Older files (written before long-term tracking) are re-saved exactly as they were until something changes.
+      const plain = !t.milestones?.length && !t.sessions?.length && !t.isLate;
+      if (plain && hadTracking.get(t) === false) { delete r.milestones; delete r.sessions; delete r.isLate; return r; }
+      r.milestones = (t.milestones || []).map(m => enc(m, 'milestone'));
+      r.sessions = (t.sessions || []).map(x => enc(x, 'session'));
+      r.isLate = !!t.isLate;
+      return r;
+    }),
     plans: doc.plans.map(p => { const r = enc(p, 'plan'); r.blocks = p.blocks.map(b => enc(b, 'block')); return r; }),
     settings: enc(doc.settings, 'settings'),
   };

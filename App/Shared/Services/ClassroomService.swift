@@ -11,6 +11,11 @@ struct ClassroomItem {
     var workType: String?
     var maxPoints: Double?
     var description: String?
+    /// NEW, CREATED, TURNED_IN, RETURNED, RECLAIMED_BY_STUDENT
+    var state: String?
+    var assignedGrade: Double?
+    var isLate: Bool = false
+    var assignedOn: Date?
 }
 
 /// Reads your courses, their published coursework, and your own submission state (turned in or not).
@@ -35,35 +40,47 @@ struct ClassroomService {
         let creationTime: String?
     }
     private struct SubmissionPage: Decodable { let studentSubmissions: [Submission]?; let nextPageToken: String? }
-    private struct Submission: Decodable { let courseWorkId: String?; let state: String? }
+    private struct Submission: Decodable {
+        let courseWorkId: String?
+        let state: String?
+        let assignedGrade: Double?
+        let late: Bool?
+    }
 
     func fetchAssignments(now: Date = Date()) async throws -> [ClassroomItem] {
         let courses = try await pages(CoursesPage.self, base: "https://classroom.googleapis.com/v1/courses?studentId=me&courseStates=ACTIVE&pageSize=100") {
             ($0.courses ?? [], $0.nextPageToken)
         }
-        let oldest = now.addingTimeInterval(-21 * 86_400)
+        // Far enough back to cover the semester, so grades and finished work build up a history.
+        let oldest = now.addingTimeInterval(-150 * 86_400)
 
         return try await withThrowingTaskGroup(of: [ClassroomItem].self) { group in
             for course in courses {
                 group.addTask {
                     let base = "https://classroom.googleapis.com/v1/courses/\(course.id)"
-                    async let works = pages(WorkPage.self, base: base + "/courseWork?courseWorkStates=PUBLISHED&orderBy=dueDate%20desc&pageSize=60") {
+                    async let works = pages(WorkPage.self, base: base + "/courseWork?courseWorkStates=PUBLISHED&orderBy=dueDate%20desc&pageSize=100") {
                         ($0.courseWork ?? [], $0.nextPageToken)
                     }
                     async let subs = pages(SubmissionPage.self, base: base + "/courseWork/-/studentSubmissions?userId=me&pageSize=100") {
                         ($0.studentSubmissions ?? [], $0.nextPageToken)
                     }
                     let (workList, subList) = try await (works, subs)
-                    let turnedIn = Set(subList.filter { ["TURNED_IN", "RETURNED"].contains($0.state ?? "") }.compactMap(\.courseWorkId))
+                    let subsByWork = Dictionary(subList.compactMap { s in s.courseWorkId.map { ($0, s) } }, uniquingKeysWith: { a, _ in a })
                     let created = ISO8601DateFormatter()
+                    created.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+                    let createdPlain = ISO8601DateFormatter()
                     return workList.compactMap { w -> ClassroomItem? in
                         let due = Self.dueDate(w.dueDate, w.dueTime)
                         if let due, due < oldest { return nil }
-                        if due == nil, let c = w.creationTime.flatMap({ created.date(from: $0) }), c < oldest { return nil }
+                        let assigned = w.creationTime.flatMap { created.date(from: $0) ?? createdPlain.date(from: $0) }
+                        if due == nil, let c = assigned, c < oldest { return nil }
+                        let sub = subsByWork[w.id]
                         return ClassroomItem(externalID: "\(course.id):\(w.id)", title: w.title ?? "Untitled",
                                              course: course.name, due: due, link: w.alternateLink,
-                                             isTurnedIn: turnedIn.contains(w.id), workType: w.workType,
-                                             maxPoints: w.maxPoints, description: w.description)
+                                             isTurnedIn: ["TURNED_IN", "RETURNED"].contains(sub?.state ?? ""), workType: w.workType,
+                                             maxPoints: w.maxPoints, description: w.description,
+                                             state: sub?.state, assignedGrade: sub?.assignedGrade, isLate: sub?.late ?? false,
+                                             assignedOn: assigned)
                     }
                 }
             }
@@ -95,7 +112,7 @@ struct ClassroomService {
             let (chunk, next) = extract(try JSONDecoder().decode(Page.self, from: data))
             items += chunk
             token = next
-        } while token != nil && items.count < 500
+        } while token != nil && items.count < 800
         return items
     }
 

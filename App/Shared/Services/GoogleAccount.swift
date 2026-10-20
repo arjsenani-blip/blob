@@ -38,6 +38,13 @@ final class GoogleAccount: NSObject, ObservableObject, ASWebAuthenticationPresen
         "https://www.googleapis.com/auth/classroom.coursework.me.readonly",
     ]
     static let driveScope = "https://www.googleapis.com/auth/drive.appdata"
+    /// Read your calendars and add/update Blob's own events.
+    static let calendarScopes = [
+        "https://www.googleapis.com/auth/calendar.events",
+        "https://www.googleapis.com/auth/calendar.calendarlist.readonly",
+    ]
+    /// Assignments as Google Tasks, which Google Calendar shows as tasks on their due dates.
+    static let tasksScope = "https://www.googleapis.com/auth/tasks"
 
     private struct Tokens: Codable {
         var accessToken: String
@@ -55,7 +62,15 @@ final class GoogleAccount: NSObject, ObservableObject, ASWebAuthenticationPresen
     private var session: ASWebAuthenticationSession?
 
     var isSignedIn: Bool { tokens != nil }
-    func hasScope(_ scope: String) -> Bool { tokens?.scopes.contains(scope) ?? false }
+    func hasScope(_ scope: String) -> Bool { tokens?.scopes.split(separator: " ").contains { $0 == scope } ?? false }
+    var grantedScopes: [String] {
+        (tokens?.scopes ?? "").split(separator: " ").map(String.init).filter { $0.hasPrefix("https://") }
+    }
+
+    /// Ask for more access while keeping what was already granted (e.g. adding Google Calendar to the school account).
+    func addScopes(_ scopes: [String]) async {
+        await signIn(scopes: Array(Set(grantedScopes + scopes)).sorted())
+    }
 
     init(role: Role) {
         self.role = role
@@ -110,6 +125,7 @@ final class GoogleAccount: NSObject, ObservableObject, ASWebAuthenticationPresen
             .init(name: "code_challenge", value: challenge),
             .init(name: "code_challenge_method", value: "S256"),
             .init(name: "access_type", value: "offline"),
+            .init(name: "include_granted_scopes", value: "true"),
             .init(name: "prompt", value: "consent select_account"),
         ]
 

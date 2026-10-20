@@ -201,6 +201,19 @@ public struct BrainTask: SyncRecord, Hashable {
     /// Minutes actually spent (from timeline Start/Done). Used to learn better estimates per course.
     public var actualMinutes: Int?
     public var estimateIsUserSet: Bool
+    // Long-term tracking (all optional in the file, so older data still loads).
+    /// When the assignment was given / when you plan to start. Used to judge whether you're on pace.
+    public var startDate: Date?
+    public var createdAt: Date?
+    /// Steps of a bigger assignment, each with its own target date.
+    public var milestones: [Milestone]
+    /// Every stretch of time you've worked on it.
+    public var sessions: [WorkSession]
+    public var pointsEarned: Double?
+    public var maxPoints: Double?
+    /// Classroom's submission state: NEW, CREATED, TURNED_IN, RETURNED, RECLAIMED_BY_STUDENT.
+    public var submissionState: String?
+    public var isLate: Bool
     public var updatedAt: Date
     public var deleted: Bool
 
@@ -208,7 +221,10 @@ public struct BrainTask: SyncRecord, Hashable {
                 estimatedMinutes: Int = 30, difficulty: Int = 2, priority: Priority = .normal,
                 source: Source = .manual, externalID: String? = nil, link: String? = nil,
                 isCompleted: Bool = false, completedAt: Date? = nil, actualMinutes: Int? = nil,
-                estimateIsUserSet: Bool = false, updatedAt: Date = Date(), deleted: Bool = false) {
+                estimateIsUserSet: Bool = false, startDate: Date? = nil, createdAt: Date? = Date(),
+                milestones: [Milestone] = [], sessions: [WorkSession] = [], pointsEarned: Double? = nil,
+                maxPoints: Double? = nil, submissionState: String? = nil, isLate: Bool = false,
+                updatedAt: Date = Date(), deleted: Bool = false) {
         self.id = id
         self.title = title
         self.course = course
@@ -224,8 +240,45 @@ public struct BrainTask: SyncRecord, Hashable {
         self.completedAt = completedAt
         self.actualMinutes = actualMinutes
         self.estimateIsUserSet = estimateIsUserSet
+        self.startDate = startDate
+        self.createdAt = createdAt
+        self.milestones = milestones
+        self.sessions = sessions
+        self.pointsEarned = pointsEarned
+        self.maxPoints = maxPoints
+        self.submissionState = submissionState
+        self.isLate = isLate
         self.updatedAt = updatedAt
         self.deleted = deleted
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(UUID.self, forKey: .id)
+        title = try c.decode(String.self, forKey: .title)
+        course = try c.decodeIfPresent(String.self, forKey: .course)
+        notes = try c.decodeIfPresent(String.self, forKey: .notes)
+        due = try c.decodeIfPresent(Date.self, forKey: .due)
+        estimatedMinutes = try c.decodeIfPresent(Int.self, forKey: .estimatedMinutes) ?? 30
+        difficulty = try c.decodeIfPresent(Int.self, forKey: .difficulty) ?? 2
+        priority = try c.decodeIfPresent(Priority.self, forKey: .priority) ?? .normal
+        source = try c.decodeIfPresent(Source.self, forKey: .source) ?? .manual
+        externalID = try c.decodeIfPresent(String.self, forKey: .externalID)
+        link = try c.decodeIfPresent(String.self, forKey: .link)
+        isCompleted = try c.decodeIfPresent(Bool.self, forKey: .isCompleted) ?? false
+        completedAt = try c.decodeIfPresent(Date.self, forKey: .completedAt)
+        actualMinutes = try c.decodeIfPresent(Int.self, forKey: .actualMinutes)
+        estimateIsUserSet = try c.decodeIfPresent(Bool.self, forKey: .estimateIsUserSet) ?? false
+        startDate = try c.decodeIfPresent(Date.self, forKey: .startDate)
+        createdAt = try c.decodeIfPresent(Date.self, forKey: .createdAt)
+        milestones = try c.decodeIfPresent([Milestone].self, forKey: .milestones) ?? []
+        sessions = try c.decodeIfPresent([WorkSession].self, forKey: .sessions) ?? []
+        pointsEarned = try c.decodeIfPresent(Double.self, forKey: .pointsEarned)
+        maxPoints = try c.decodeIfPresent(Double.self, forKey: .maxPoints)
+        submissionState = try c.decodeIfPresent(String.self, forKey: .submissionState)
+        isLate = try c.decodeIfPresent(Bool.self, forKey: .isLate) ?? false
+        updatedAt = try c.decodeIfPresent(Date.self, forKey: .updatedAt) ?? .distantPast
+        deleted = try c.decodeIfPresent(Bool.self, forKey: .deleted) ?? false
     }
 }
 
@@ -245,10 +298,14 @@ public struct PlanBlock: Codable, Hashable, Identifiable, Sendable {
     public var partsTotal: Int?
     public var isDone: Bool
     public var startedAt: Date?
+    /// The step of a long-term assignment this block works on.
+    public var milestoneID: UUID?
+    /// True when this block is just today's share of a bigger assignment — finishing it doesn't finish the assignment.
+    public var sessionOnly: Bool?
 
     public init(id: UUID = UUID(), kind: Kind, title: String, subtitle: String? = nil, start: Date, end: Date,
                 reason: String? = nil, taskID: UUID? = nil, part: Int? = nil, partsTotal: Int? = nil,
-                isDone: Bool = false, startedAt: Date? = nil) {
+                isDone: Bool = false, startedAt: Date? = nil, milestoneID: UUID? = nil, sessionOnly: Bool? = nil) {
         self.id = id
         self.kind = kind
         self.title = title
@@ -261,6 +318,8 @@ public struct PlanBlock: Codable, Hashable, Identifiable, Sendable {
         self.partsTotal = partsTotal
         self.isDone = isDone
         self.startedAt = startedAt
+        self.milestoneID = milestoneID
+        self.sessionOnly = sessionOnly
     }
 
     public var minutes: Int { Int(end.timeIntervalSince(start) / 60) }

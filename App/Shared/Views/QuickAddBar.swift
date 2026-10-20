@@ -17,8 +17,17 @@ struct QuickAddBar: View {
         "Essay due friday ~90m #English",
         "Study group sat 11-1pm",
         "Call grandma in 2 hours",
+        "History project due nov 20 long-term",
+        "Worked 45 min on the history essay",
+        "Finished the outline for my english essay",
+        "Got 92/100 on the chem lab",
     ]
-    @State private var exampleIndex = Int.random(in: 0..<5)
+    @State private var exampleIndex = Int.random(in: 0..<9)
+
+    /// "worked 45 min on …", "finished the outline …", "got 92/100 on …" — logging progress instead of adding.
+    private var log: (intent: LogIntent, task: BrainTask?)? {
+        text.trimmingCharacters(in: .whitespaces).isEmpty || override != nil ? nil : store.logPreview(text)
+    }
 
     private var parsed: ParsedEntry? {
         text.trimmingCharacters(in: .whitespaces).isEmpty ? nil : store.parse(text)
@@ -47,7 +56,10 @@ struct QuickAddBar: View {
                     .keyboardShortcut(.return, modifiers: [])
                 }
             }
-            if let p = parsed {
+            if let l = log {
+                logPreview(l)
+                    .transition(.opacity.combined(with: .move(edge: .top)))
+            } else if let p = parsed {
                 preview(p)
                     .transition(.opacity.combined(with: .move(edge: .top)))
             }
@@ -95,7 +107,44 @@ struct QuickAddBar: View {
         }
     }
 
+    @ViewBuilder
+    private func logPreview(_ l: (intent: LogIntent, task: BrainTask?)) -> some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 6) {
+                Menu {
+                    Button("Log progress", systemImage: "chart.line.uptrend.xyaxis") {}
+                    Button("Add as to-do instead", systemImage: "checklist") { override = .task }
+                    Button("Add as event instead", systemImage: "calendar") { override = .event }
+                } label: {
+                    Chip(text: "Log", icon: "chart.line.uptrend.xyaxis", color: .teal)
+                }
+                .menuStyle(.button).buttonStyle(.plain).fixedSize()
+                switch l.intent {
+                case .worked(let m, _, _): Chip(text: "+" + Scheduler.durationText(m), icon: "timer", color: .purple)
+                case .finishedStep(let step, _): Chip(text: "Step done: \(step)", icon: "checkmark.circle", color: .green)
+                case .completed: Chip(text: "Mark done", icon: "checkmark.seal.fill", color: .green)
+                case .started: Chip(text: "Started", icon: "play.fill", color: .blue)
+                case .progress(let p, _): Chip(text: "\(p)% done", icon: "chart.pie.fill", color: .blue)
+                case .grade(let e, let p, _): Chip(text: "\(BrainStore.fmt(e))/\(BrainStore.fmt(p))", icon: "rosette", color: .orange)
+                case .planSteps: Chip(text: "Split into steps", icon: "list.number", color: Brand.violet)
+                }
+                if let t = l.task {
+                    Chip(text: t.title, icon: "doc.text", color: .primary)
+                    if let c = t.course { Chip(text: c, icon: "graduationcap", color: Brand.color(for: c)) }
+                } else {
+                    Chip(text: "Which assignment?", icon: "questionmark", color: .red)
+                }
+            }
+        }
+    }
+
     private func commit() {
+        if log != nil {
+            withAnimation { _ = store.applyLog(text) }
+            text = ""
+            onAdded?()
+            return
+        }
         guard let p = parsed else { return }
         withAnimation { store.add(p, as: override) }
         text = ""
@@ -115,7 +164,7 @@ struct QuickAddSheet: View {
                 Button("Done") { dismiss() }.keyboardShortcut(.cancelAction)
             }
             QuickAddBar(autofocus: true) { dismiss() }
-            Text("Dates, times, ranges, “every tue”, “in 2 hours”, “@ place”, “#tag”, “due fri”, “~45m”, “!!”")
+            Text("Dates, times, ranges, “every tue”, “in 2 hours”, “@ place”, “#tag”, “due fri”, “~45m”, “!!”, “long-term”.\nLog progress too: “worked 30 min on …”, “finished the outline for …”, “got 18/20 on …”")
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }

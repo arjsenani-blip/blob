@@ -23,9 +23,11 @@
 	<key>ITSAppUsesNonExemptEncryption</key>
 	<false/>
 	<key>NSCalendarsFullAccessUsageDescription</key>
-	<string>Shows your Apple Calendar events alongside your plan so homework isn't scheduled on top of them.</string>
+	<string>Shows your calendar events alongside your plan so homework isn't scheduled on top of them, and adds Blob's events to a Blob calendar.</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Blob listens when you tap it, so you can talk to it.</string>
+	<key>NSRemindersFullAccessUsageDescription</key>
+	<string>Puts your assignments in a Blob list so they show up as tasks in Calendar and Reminders, and marks them done when you tick them off there.</string>
 	<key>NSSpeechRecognitionUsageDescription</key>
 	<string>Blob turns what you say into text, on your iPhone.</string>
 	<key>UIApplicationSceneManifest</key>

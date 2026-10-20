@@ -1,11 +1,11 @@
 {
   "name": "blob",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Blob \u2014 your planner and voice assistant, for Windows",
   "main": "src/main.js",
   "scripts": {
     "start": "electron .",
-    "test": "node --test test/parser.test.js test/core.test.js",
+    "test": "node --test test/parser.test.js test/core.test.js test/tracking.test.js",
     "dist": "electron-builder --win --x64"
   },
   "author": "Arjun Senani",

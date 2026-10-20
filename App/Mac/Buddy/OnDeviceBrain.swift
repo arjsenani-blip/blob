@@ -64,7 +64,7 @@ final class OnDeviceBrain {
             YouTubeTool(tools: t), SearchWebTool(tools: t), PlayMusicTool(tools: t),
             ListUITool(tools: t), ClickUITool(tools: t), MenuTool(tools: t), TypeTool(tools: t), KeysTool(tools: t),
             ScheduleTool(tools: t), AssignmentsTool(tools: t), AddEventTool(tools: t), AddTaskTool(tools: t),
-            CheckInTool(tools: t), TimerTool(tools: t), SearchFilesTool(tools: t), ReadFileTool(tools: t),
+            CheckInTool(tools: t), LogProgressTool(tools: t), StatusTool(tools: t), TimerTool(tools: t), SearchFilesTool(tools: t), ReadFileTool(tools: t),
             ReadScreenTool(tools: t), ClipboardTool(tools: t), SystemStatusTool(tools: t),
         ]
         return LanguageModelSession(tools: deviceTools, instructions: """
@@ -166,8 +166,31 @@ struct AddTaskTool: Tool {
     @Generable struct Arguments {
         @Guide(description: "What to do") var title: String
         @Guide(description: "Due, YYYY-MM-DDTHH:MM, or empty") var due: String
+        @Guide(description: "True for a big project/essay/test worked on over days") var longTerm: Bool
     }
-    func call(arguments: Arguments) async throws -> String { await run(tools, "add_task", ["title": arguments.title, "due": arguments.due]) }
+    func call(arguments: Arguments) async throws -> String {
+        await run(tools, "add_task", ["title": arguments.title, "due": arguments.due, "long_term": arguments.longTerm])
+    }
+}
+
+struct LogProgressTool: Tool {
+    let tools: BuddyTools
+    let name = "log_progress"
+    let description = "Log progress on an assignment: time spent, a step finished, done, percent, or a grade."
+    @Generable struct Arguments {
+        @Guide(description: "The user's sentence, e.g. 'worked 45 min on the history essay' or 'got 92/100 on the chem lab'") var sentence: String
+    }
+    func call(arguments: Arguments) async throws -> String { await run(tools, "log_progress", ["sentence": arguments.sentence]) }
+}
+
+struct StatusTool: Tool {
+    let tools: BuddyTools
+    let name = "assignment_status"
+    let description = "How long-term assignments are going: progress, pace, next step."
+    @Generable struct Arguments {
+        @Guide(description: "Assignment name, or empty for all") var title: String
+    }
+    func call(arguments: Arguments) async throws -> String { await run(tools, "assignment_status", ["title": arguments.title]) }
 }
 
 struct CheckInTool: Tool {

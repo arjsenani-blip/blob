@@ -298,6 +298,13 @@ final class PhoneBrain {
     }
 
     func respond(to raw: String) async -> String {
+        // "worked 45 min on the essay", "finished the outline", "got a 95 on the bio test" — instant, offline.
+        if let (intent, task) = store.logPreview(raw) {
+            return task == nil ? "Which assignment was that for, sir?" : store.apply(intent) + ". Well done, sir."
+        }
+        if raw.lowercased().range(of: #"\b(am i (on track|behind)|how are my (projects|long[- ]?term)|progress report|status update)\b"#, options: .regularExpression) != nil {
+            return store.trackerSummary().replacingOccurrences(of: "\n", with: ". ") + "."
+        }
         if let quick = await quickCommand(raw) { return quick }
         if Self.aiAvailable {
             if session == nil || Date().timeIntervalSince(lastUse) > 600 { session = makeSession() }
@@ -319,12 +326,14 @@ final class PhoneBrain {
     private func makeSession() -> LanguageModelSession {
         let tools: [any Tool] = [PhoneScheduleTool(store: store), PhoneAssignmentsTool(store: store), PhoneAddTaskTool(store: store),
                                  PhoneAddEventTool(store: store), PhoneCompleteTool(store: store), PhoneCheckInTool(store: store),
-                                 PhoneOpenTool()]
+                                 PhoneLogTool(store: store), PhoneStatusTool(store: store), PhoneOpenTool()]
         return LanguageModelSession(tools: tools, instructions: """
             You are Blob, a polite British AI butler like JARVIS, living in the user's planner app on their iPhone. Always call the user "sir".
             Answer in one or two short spoken sentences, no lists or markdown. Use the tools to read and change their planner.
             Homework, essays, projects, readings and "study for" are assignments: use add_assignment, never add_event.
             Only practices, games, appointments, meetings and the test itself are events. Dates use YYYY-MM-DDTHH:MM local time.
+            Big projects, essays and test studying are long-term: set long_term true. When the user says what they did, use log_progress.
+            For "how am I doing" use assignment_status.
             """)
     }
 
@@ -437,7 +446,10 @@ struct PhoneAssignmentsTool: Tool {
     func call(arguments: Arguments) async throws -> String {
         await MainActor.run {
             let open = store.pendingTasks.sorted { ($0.due ?? .distantFuture) < ($1.due ?? .distantFuture) }.prefix(15)
-            return open.isEmpty ? "No open assignments." : open.map { "\($0.title)\($0.course.map { " [\($0)]" } ?? "")\($0.due.map { " due \($0.dueText())" } ?? "")" }.joined(separator: "\n")
+            return open.isEmpty ? "No open assignments." : open.map {
+                "\($0.title)\($0.course.map { " [\($0)]" } ?? "")\($0.due.map { " due \($0.dueText())" } ?? "")"
+                    + ($0.isLongTerm ? " · \(Int($0.progress * 100))% \($0.pace().label)" : "")
+            }.joined(separator: "\n")
         }
     }
 }
@@ -450,13 +462,18 @@ struct PhoneAddTaskTool: Tool {
         @Guide(description: "What to do") var title: String
         @Guide(description: "Due YYYY-MM-DDTHH:MM or empty") var due: String
         @Guide(description: "Class name or empty") var course: String
+        @Guide(description: "True for a big project/essay/test worked on over days") var long_term: Bool
     }
     func call(arguments: Arguments) async throws -> String {
         await MainActor.run {
-            var due = PhoneTools.date(arguments.due).map { $0.1 ? Calendar.current.date(bySettingHour: 23, minute: 59, second: 0, of: $0.0)! : $0.0 }
-            if due == nil, arguments.due.isEmpty == false { due = nil }
+            let due = PhoneTools.date(arguments.due).map { $0.1 ? Calendar.current.date(bySettingHour: 23, minute: 59, second: 0, of: $0.0)! : $0.0 }
             let course = arguments.course.isEmpty ? store.parse(arguments.title).course : arguments.course
-            store.upsert(BrainTask(title: arguments.title, course: course, due: due))
+            let t = BrainTask(title: arguments.title, course: course, due: due)
+            store.upsert(t)
+            store.setUpLongTermIfNeeded(t.id, explicit: arguments.long_term)
+            if let s = store.task(t.id), !s.milestones.isEmpty {
+                return "Added \(arguments.title), tracked long-term in \(s.milestones.count) steps: " + s.milestones.map(\.title).joined(separator: ", ")
+            }
             return "Added assignment \(arguments.title)."
         }
     }
@@ -488,14 +505,34 @@ struct PhoneCompleteTool: Tool {
     @Generable struct Arguments { @Guide(description: "Title or part of it") var title: String }
     func call(arguments: Arguments) async throws -> String {
         await MainActor.run {
-            let q = arguments.title.lowercased()
-            guard let t = store.pendingTasks.first(where: { $0.title.lowercased().contains(q) || q.contains($0.title.lowercased()) }) else {
+            guard var t = TaskMatcher.best(arguments.title, in: store.pendingTasks) else {
                 return "No open assignment matches that."
             }
-            store.toggle(t)
+            store.markDone(&t)
+            store.upsert(t)
             return "Marked \(t.title) done."
         }
     }
+}
+
+struct PhoneLogTool: Tool {
+    let store: BrainStore
+    let name = "log_progress"
+    let description = "Log progress on an assignment: time spent, a step finished, done, percent, or a grade."
+    @Generable struct Arguments {
+        @Guide(description: "The user's sentence, e.g. 'worked 45 min on the history essay'") var sentence: String
+    }
+    func call(arguments: Arguments) async throws -> String {
+        await MainActor.run { store.applyLog(arguments.sentence) ?? "Say it like 'worked 30 min on X' or 'finished the outline for X'." }
+    }
+}
+
+struct PhoneStatusTool: Tool {
+    let store: BrainStore
+    let name = "assignment_status"
+    let description = "How long-term assignments are going: progress, pace, next step."
+    @Generable struct Arguments {}
+    func call(arguments: Arguments) async throws -> String { await MainActor.run { store.trackerSummary() } }
 }
 
 struct PhoneCheckInTool: Tool {

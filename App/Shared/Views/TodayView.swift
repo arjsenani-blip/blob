@@ -17,14 +17,33 @@ struct TodayView: View {
                     checkInCard
                 }
                 agenda
+                longTerm
             }
             .padding(20)
             .page()
         }
         .background(Brand.canvas)
         .navigationTitle("Today")
-        .sheet(item: $editingTask) { TaskEditor(task: $0) }
+        .sheet(item: $editingTask) { AssignmentDetail(taskID: $0.id) }
         .sheet(item: $editingEvent) { EventEditor(event: $0) }
+    }
+
+    /// The big assignments, so they're never out of sight.
+    @ViewBuilder
+    private var longTerm: some View {
+        let items = store.pendingTasks.filter(\.isLongTerm).sorted { ($0.due ?? .distantFuture) < ($1.due ?? .distantFuture) }.prefix(3)
+        if !items.isEmpty {
+            VStack(alignment: .leading, spacing: 12) {
+                SectionTitle(title: "Long-term", trailing: "\(items.count) in progress")
+                VStack(spacing: 0) {
+                    ForEach(Array(items)) { t in
+                        LongTermRow(task: t).contentShape(Rectangle()).onTapGesture { editingTask = t }
+                        if t.id != items.last?.id { Divider() }
+                    }
+                }
+                .card(padding: 12)
+            }
+        }
     }
 
     private var greeting: String {
@@ -336,7 +355,14 @@ struct TaskRow: View {
                     if let d = task.due {
                         Chip(text: d.dueText(), icon: overdue ? "exclamationmark.triangle.fill" : "flag", color: overdue ? .red : .orange)
                     }
-                    Chip(text: Scheduler.durationText(task.estimatedMinutes), icon: "timer", color: .secondary)
+                    if task.isLongTerm && !task.isCompleted {
+                        let pace = task.pace()
+                        Chip(text: "\(Int(task.progress * 100))% · \(pace.label)", icon: pace.icon, color: pace.color)
+                    } else if let g = task.percentGrade {
+                        Chip(text: "\(Int(g.rounded()))%", icon: "rosette", color: g >= 90 ? .green : g >= 80 ? .blue : .orange)
+                    } else {
+                        Chip(text: Scheduler.durationText(task.estimatedMinutes), icon: "timer", color: .secondary)
+                    }
                     if task.priority == .high { Image(systemName: "exclamationmark.2").foregroundStyle(.red).font(.caption.bold()) }
                 }
             }

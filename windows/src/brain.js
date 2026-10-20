@@ -7,12 +7,16 @@ const path = require('path');
 const { spawn, execFile } = require('child_process');
 const sys = require('./system');
 const { dueText, shortTime } = require('./core/dates');
+const tracking = require('./core/tracking');
+const { bestTask } = require('./core/progresslog');
+const { durationText } = require('./core/scheduler');
 
 const PERSONA = 'You are Blob, a refined British AI butler — think JARVIS — who lives as a glowing cyan blob in the corner of the user\'s Windows PC. '
   + 'Always address the user as "sir". Be calm, precise and quietly witty; never gushing. You speak out loud, so reply in one to three short spoken '
   + 'sentences: no markdown, no lists, no emoji, and don\'t read URLs aloud. The user is a high school student — for homework, guide and explain rather '
   + 'than writing the assignment for them. In this mode you can\'t operate the PC; if asked to, tell them to ask it as a direct command, like "open YouTube". '
-  + 'Use web search for anything current. Answer directly — no preamble.';
+  + 'Use web search for anything current. Answer directly — no preamble. '
+  + 'To log homework progress the user can just say it, like "worked 45 minutes on the history essay" or "got a 92 on the chem lab"; to add a big project, "history project due nov 20 long-term".';
 
 class Brain {
   constructor(store) {
@@ -159,10 +163,28 @@ class Brain {
       const open = this.store.pending.filter(x => x.due).sort((a, b) => a.due - b.due).slice(0, 3);
       return open.length ? `Next up: ${open.map(x => `${x.title}, ${dueText(x.due)}`).join('; ')}, sir.` : 'Nothing due, sir.';
     }
+    // Assignment tracking: "worked 45 min on the essay", "finished the outline", "got 92 on the chem test"
+    const log = this.store.logPreview(raw);
+    if (log) return log.task ? this.store.applyIntent(log.intent) + '. Well done, sir.' : 'Which assignment was that for, sir? I couldn\'t match it.';
+    if (m(/^how(?:'s| is| am i doing on| are)? (?:my )?(?:long[- ]?term (?:assignments|projects|stuff)|projects|big assignments)(?: going| doing)?$|^(?:give me |what'?s )?(?:a |my )?(?:progress|status) (?:report|update)$|^am i (?:on track|behind)(?: on anything)?$/)) {
+      return this.store.trackerSummary().replace(/\n/g, '. ') + '.';
+    }
+    if ((g = m(/^how(?:'s| is| am i doing on| far along am i on) (?:my |the )?(.+?)(?: going| coming along)?$/))) {
+      const x = bestTask(g[1], this.store.tasks);
+      if (x) {
+        let s = `${x.title} is ${Math.round(tracking.progress(x) * 100)} percent done — ${tracking.PACE_LABEL[tracking.pace(x)].toLowerCase()}`;
+        const n = tracking.nextMilestone(x);
+        if (n) s += `. Next step: ${n.title}` + (n.due ? `, by ${dueText(n.due, false)}` : '');
+        const need = tracking.minutesPerDayNeeded(x);
+        if (need) s += `. About ${durationText(need)} a day keeps you on pace`;
+        return s + ', sir.';
+      }
+    }
     // Quick add: "remind me to…", "add…", or anything with a date that reads like an event or assignment.
     if (/^(?:remind me to|add|todo|schedule|put)\b/i.test(raw)) {
       const p = this.store.parse(raw.replace(/^(?:add|put|schedule)\s+/i, '').replace(/\s+(?:to|on|in) my (?:calendar|planner|list)/i, ''));
-      this.store.add(p);
+      const msg = this.store.add(p);
+      if (msg.startsWith('Tracking')) return msg.replace('Tracking', "I'll track") + ', sir.';
       return `Added ${p.title}${p.start ? (p.kind === 'task' ? ', due ' : ' for ') + dueText(p.start, p.hasExplicitTime) : ''}, sir.`;
     }
     return null;

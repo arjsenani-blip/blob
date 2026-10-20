@@ -88,16 +88,51 @@ struct SettingsScreen: View {
             }
 
             Section {
-                Toggle("Show Apple Calendar events", isOn: Binding(
+                Toggle("Show my Apple Calendar events", isOn: Binding(
                     get: { store.useAppleCalendar },
                     set: { on in
                         store.useAppleCalendar = on
                         if on { Task { await systemCalendar.requestAccess() } }
                     }))
-                if store.useAppleCalendar && !systemCalendar.authorized {
+                Toggle("Assignments show up as tasks in Calendar", isOn: Binding(
+                    get: { store.appleTasksOn },
+                    set: { on in
+                        store.appleTasksOn = on
+                        if on { Task { await systemCalendar.requestRemindersAccess(); await store.syncApple() } }
+                    }))
+                if store.appleTasksOn {
+                    Toggle("Include the steps of long-term assignments", isOn: Binding(
+                        get: { store.appleStepsOn }, set: { store.appleStepsOn = $0; Task { await store.syncApple() } }))
+                    if !systemCalendar.remindersAuthorized {
+                        Text("Allow Reminders access in System Settings → Privacy & Security → Reminders.").font(.caption).foregroundStyle(.orange)
+                    }
+                }
+                Toggle("Add Blob's events to Apple Calendar", isOn: Binding(
+                    get: { store.appleEventsOn },
+                    set: { on in
+                        store.appleEventsOn = on
+                        if on { Task { await systemCalendar.requestAccess(); await store.syncApple() } }
+                    }))
+                if (store.useAppleCalendar || store.appleEventsOn) && !systemCalendar.authorized {
                     Text("Allow calendar access in System Settings → Privacy & Security → Calendars.")
                         .font(.caption).foregroundStyle(.orange)
                 }
+                if let err = store.appleSyncError { Text(err).font(.caption).foregroundStyle(.red) }
+            } header: {
+                Text("Apple Calendar")
+            } footer: {
+                Text("Assignments go into a “Blob” list with their due dates, so they appear as tasks in the Calendar app (and Reminders). Tick one off there and it's marked done in Blob. Blob's events go into a “Blob” calendar. Turn this on for both Mac and iPhone — they share the same iCloud items.")
+            }
+
+            Section {
+                GoogleCalendarRows(school: school, personal: personal, clientMissing: clientID.isEmpty)
+            } header: {
+                Text("Google Calendar")
+            } footer: {
+                Text("Shows the calendars you have turned on in Google Calendar, can put Blob's events on your main Google calendar, and can add assignments as Google Tasks — which Google Calendar shows as tasks on their due dates. Needs the Google Calendar API and Google Tasks API turned on in your Google Cloud project.")
+            }
+
+            Section {
                 Toggle("Reminders", isOn: Binding(
                     get: { store.remindersOn },
                     set: { on in
@@ -109,9 +144,7 @@ struct SettingsScreen: View {
                     Stepper("Remind me \(store.reminderLead) min before events", value: $store.reminderLead, in: 0...120, step: 5)
                 }
             } header: {
-                Text("Calendar & notifications")
-            } footer: {
-                Text("Apple Calendar includes any Google or iCloud calendars you've added to this device. They're shown read-only and the planner works around them.")
+                Text("Notifications")
             }
 
             Section("About") {
@@ -191,7 +224,7 @@ private struct SetupHelp: View {
                 VStack(alignment: .leading, spacing: 14) {
                     Text("Google gives each app its own ID. This takes about 5 minutes, once:").foregroundStyle(.secondary)
                     step(1, "Go to console.cloud.google.com and create a project called “Blob”.")
-                    step(2, "APIs & Services → Library: enable **Google Classroom API** and **Google Drive API**.")
+                    step(2, "APIs & Services → Library: enable **Google Classroom API**, **Google Drive API**, **Google Calendar API** and **Google Tasks API**.")
                     step(3, "OAuth consent screen: choose **External**, fill in the app name and your email. Under **Test users**, add your school email and your personal Gmail.")
                     step(4, "Credentials → Create credentials → OAuth client ID → type **iOS**. Bundle ID: **com.arjunsenani.brain**.")
                     step(5, "Copy the client ID (ends in .apps.googleusercontent.com) and paste it here on both your Mac and iPhone.")
@@ -213,5 +246,46 @@ private struct SetupHelp: View {
             Text("\(n)").font(.headline).foregroundStyle(.white).frame(width: 28, height: 28).background(Brand.gradient, in: Circle())
             Text(text)
         }
+    }
+}
+
+private struct GoogleCalendarRows: View {
+    @EnvironmentObject var store: BrainStore
+    @ObservedObject var school: GoogleAccount
+    @ObservedObject var personal: GoogleAccount
+    var clientMissing: Bool
+
+    var body: some View {
+        if let acct = store.calendarAccount {
+            LabeledContent("Connected", value: acct.email ?? "Google account")
+            Toggle("Show my Google Calendar events", isOn: Binding(
+                get: { store.googleCalendarOn }, set: { store.googleCalendarOn = $0; Task { await store.syncGoogle(force: true) } }))
+            Toggle("Add Blob's events to Google Calendar", isOn: Binding(
+                get: { store.googleEventsPushOn }, set: { store.googleEventsPushOn = $0; Task { await store.syncGoogle() } }))
+            Toggle("Assignments as Google Tasks", isOn: Binding(
+                get: { store.googleTasksOn }, set: { store.googleTasksOn = $0; Task { await store.syncGoogle() } }))
+            Button {
+                Task { await store.syncGoogle(force: true) }
+            } label: {
+                HStack {
+                    Label("Sync Google Calendar now", systemImage: "arrow.triangle.2.circlepath")
+                    Spacer()
+                    if store.isSyncingGoogle { ProgressView().controlSize(.small) }
+                }
+            }
+        } else {
+            Text(school.isSignedIn || personal.isSignedIn ? "Connect the account whose calendar you use." : "Sign in with Google above first.")
+                .font(.subheadline).foregroundStyle(.secondary)
+        }
+        ForEach([personal, school].filter { $0.isSignedIn && !$0.hasScope(GoogleAccount.calendarScopes[0]) }, id: \.role) { acct in
+            Button {
+                Task { await store.connectGoogleCalendar(on: acct) }
+            } label: {
+                Label("Connect Google Calendar on \(acct.email ?? acct.role.rawValue)", systemImage: "calendar.badge.plus")
+            }
+            .disabled(clientMissing || acct.isWorking)
+            if let e = acct.lastError { Text(e).font(.caption).foregroundStyle(.red) }
+        }
+        if let err = store.googleCalendarError { Text(err).font(.caption).foregroundStyle(.red) }
     }
 }

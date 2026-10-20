@@ -27,10 +27,50 @@ public struct Scheduler {
     }
 
     struct Item {
+        /// For a long-term assignment this is a copy titled and dated for the step being worked on.
         var task: BrainTask
         var tier: Tier
         var minutes: Int
         var isWarmUp = false
+        var milestoneID: UUID?
+        /// Only today's share of a bigger assignment.
+        var sessionOnly = false
+    }
+
+    /// What tonight's work on a task is. Long-term assignments get their next step (by that step's date),
+    /// or — without steps — an even daily share of what's left, so big projects move forward a bit every day
+    /// instead of all at once the night before.
+    func workItem(for t: BrainTask, start: Date, doneToday: Int) -> Item {
+        if let m = t.nextMilestone {
+            var copy = t
+            copy.title = "\(t.title) — \(m.title)"
+            copy.due = m.due ?? t.due
+            let loggedOnStep = t.sessions.filter { $0.milestoneID == m.id }.reduce(0) { $0 + $1.minutes }
+            let left = max(5, m.estimatedMinutes - loggedOnStep - doneToday)
+            let stepTier = tier(for: copy.due, from: start)
+            var minutes = left
+            var sessionOnly = false
+            if stepTier > .tomorrow, let due = copy.due {
+                // Not urgent yet: spread this step over the days until its date.
+                let share = paceShare(left, until: due, from: start)
+                if share < left { minutes = share; sessionOnly = true }
+            }
+            return Item(task: copy, tier: stepTier, minutes: minutes, milestoneID: m.id, sessionOnly: sessionOnly)
+        }
+        let remaining = max(5, t.remainingMinutes - doneToday)
+        let itemTier = tier(for: t.due, from: start)
+        if t.isLongTerm, itemTier > .tomorrow, let due = t.due {
+            let share = paceShare(remaining, until: due, from: start)
+            if share < remaining { return Item(task: t, tier: itemTier, minutes: share, sessionOnly: true) }
+        }
+        return Item(task: t, tier: itemTier, minutes: remaining)
+    }
+
+    /// Today's even share of `minutes` before `due`, in 5-minute steps, at least 25 minutes so it's worth sitting down.
+    func paceShare(_ minutes: Int, until due: Date, from start: Date) -> Int {
+        let days = BrainTask.workDays(from: start, to: due, calendar: calendar)
+        let share = Int((Double(minutes) / Double(days) / 5).rounded(.up)) * 5
+        return min(minutes, max(25, share))
     }
 
     struct Simulation {
@@ -56,10 +96,7 @@ public struct Scheduler {
 
         let items: [Item] = tasks
             .filter { !$0.isCompleted && !$0.deleted }
-            .map { t in
-                let remaining = max(5, t.estimatedMinutes - (progress[t.id] ?? 0))
-                return Item(task: t, tier: tier(for: t.due, from: start), minutes: remaining)
-            }
+            .map { workItem(for: $0, start: start, doneToday: progress[$0.id] ?? 0) }
 
         let energy = energyLevel(at: start)
         let smartOrder = smartOrdering(items, energy: energy)
@@ -269,7 +306,8 @@ public struct Scheduler {
                     sim.blocks.append(PlanBlock(kind: .task, title: item.task.title, subtitle: item.task.course,
                                                 start: p.start, end: p.end, reason: i == 0 ? reason : "Keep going",
                                                 taskID: item.task.id,
-                                                part: total > 1 ? i + 1 : nil, partsTotal: total > 1 ? total : nil))
+                                                part: total > 1 ? i + 1 : nil, partsTotal: total > 1 ? total : nil,
+                                                milestoneID: item.milestoneID, sessionOnly: item.sessionOnly ? true : nil))
                 }
                 sim.finish = parts.last?.end
             }
@@ -292,6 +330,7 @@ public struct Scheduler {
         case .later: base = "Getting ahead — due \(t.due!.formatted(.dateTime.month(.abbreviated).day()))"
         case .someday: base = "No due date — chipping away at it"
         }
+        if item.sessionOnly { base = "Today's share of a long-term assignment · " + base }
         if item.isWarmUp { return "Quick win to build momentum · " + base }
         if energy >= 0.7 && t.difficulty >= 3 { base += " · hardest work while you're fresh" }
         else if energy < 0.6 && item.minutes <= 25 { base += " · lighter task for this time of day" }

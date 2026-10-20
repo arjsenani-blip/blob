@@ -3,6 +3,7 @@
 'use strict';
 const { startOfDay, addDays, shortTime } = require('./dates');
 const { newId } = require('./model');
+const tracking = require('./tracking');
 
 const TIER = { overdue: 0, beforeMorning: 1, tomorrow: 2, thisWeek: 3, later: 4, someday: 5 };
 const MIN = 60000;
@@ -136,6 +137,7 @@ class Scheduler {
         parts.forEach((p, i) => sim.blocks.push({
           id: newId(), kind: 'task', title: item.task.title, subtitle: item.task.course || null, start: p.start, end: p.end,
           reason: i === 0 ? reason : 'Keep going', taskID: item.task.id, part: total > 1 ? i + 1 : null, partsTotal: total > 1 ? total : null, isDone: false,
+          milestoneID: item.milestoneID || null, sessionOnly: item.sessionOnly ? true : null,
         }));
         sim.finish = parts[parts.length - 1].end;
       }
@@ -159,10 +161,39 @@ class Scheduler {
       case TIER.later: base = `Getting ahead — due ${t.due.toLocaleDateString([], { month: 'short', day: 'numeric' })}`; break;
       default: base = 'No due date — chipping away at it';
     }
+    if (item.sessionOnly) base = "Today's share of a long-term assignment · " + base;
     if (item.warm) return 'Quick win to build momentum · ' + base;
     if (energy >= 0.7 && t.difficulty >= 3) base += " · hardest work while you're fresh";
     else if (energy < 0.6 && item.minutes <= 25) base += ' · lighter task for this time of day';
     return base;
+  }
+
+  /** Tonight's work on a task: the next step of a long-term assignment, or an even daily share of what's left. */
+  workItem(t, start, doneToday) {
+    const m = tracking.nextMilestone(t);
+    if (m) {
+      const copy = { ...t, title: `${t.title} — ${m.title}`, due: m.due || t.due };
+      const onStep = (t.sessions || []).filter(x => x.milestoneID === m.id).reduce((a, x) => a + x.minutes, 0);
+      const left = Math.max(5, m.estimatedMinutes - onStep - doneToday);
+      const tier = this.tier(copy.due, start);
+      if (tier > TIER.tomorrow && copy.due) {
+        const share = this.paceShare(left, copy.due, start);
+        if (share < left) return { task: copy, tier, minutes: share, milestoneID: m.id, sessionOnly: true };
+      }
+      return { task: copy, tier, minutes: left, milestoneID: m.id };
+    }
+    const remaining = Math.max(5, tracking.remainingMinutes(t) - doneToday);
+    const tier = this.tier(t.due, start);
+    if (tracking.isLongTerm(t) && tier > TIER.tomorrow && t.due) {
+      const share = this.paceShare(remaining, t.due, start);
+      if (share < remaining) return { task: t, tier, minutes: share, sessionOnly: true };
+    }
+    return { task: t, tier, minutes: remaining };
+  }
+
+  paceShare(minutes, due, start) {
+    const share = Math.ceil(minutes / tracking.workDays(start, due) / 5) * 5;
+    return Math.min(minutes, Math.max(25, share));
   }
 
   /** busy: occurrences [{start,end,isAllDay,title,location}]; progress: {taskId: minutesDone} */
@@ -171,8 +202,7 @@ class Scheduler {
     const [windowEnd, isLate] = this.workWindow(start);
     const busyBlocks = busy.filter(o => !o.isAllDay && o.end > start && o.start < windowEnd).sort((a, b) => a.start - b.start);
     const slots = this.freeSlots(start, windowEnd, busyBlocks);
-    const items = tasks.filter(t => !t.isCompleted && !t.deleted)
-      .map(t => ({ task: t, tier: this.tier(t.due, start), minutes: Math.max(5, t.estimatedMinutes - (progress[t.id] || 0)) }));
+    const items = tasks.filter(t => !t.isCompleted && !t.deleted).map(t => this.workItem(t, start, progress[t.id] || 0));
     const energy = this.energy(start);
     const smart = this.simulate(this.smartOrder(items, energy), slots, start, energy);
     const edf = this.simulate([...items].sort((a, b) => this.edf(a, b)), slots, start, energy);

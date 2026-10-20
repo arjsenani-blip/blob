@@ -12,15 +12,26 @@ import UIKit
 /// so the planner never schedules homework on top of something you already have.
 @MainActor
 final class SystemCalendarBridge: ObservableObject {
-    private let store = EKEventStore()
+    let store = EKEventStore()
     @Published private(set) var authorized = false
+    @Published var remindersAuthorized = false
     @Published private(set) var changeToken = 0
+    /// Called when something changes in Calendar or Reminders (e.g. you tick off a task there).
+    var onExternalChange: (() -> Void)?
 
     init() {
         authorized = EKEventStore.authorizationStatus(for: .event) == .fullAccess
+        remindersAuthorized = EKEventStore.authorizationStatus(for: .reminder) == .fullAccess
         NotificationCenter.default.addObserver(forName: .EKEventStoreChanged, object: store, queue: .main) { [weak self] _ in
-            MainActor.assumeIsolated { self?.changeToken += 1 }
+            MainActor.assumeIsolated {
+                self?.changeToken += 1
+                self?.onExternalChange?()
+            }
         }
+    }
+
+    func requestRemindersAccess() async {
+        remindersAuthorized = (try? await store.requestFullAccessToReminders()) ?? false
     }
 
     func requestAccess() async {
@@ -29,7 +40,10 @@ final class SystemCalendarBridge: ObservableObject {
 
     func occurrences(in range: DateInterval) -> [EventOccurrence] {
         guard authorized else { return [] }
-        let predicate = store.predicateForEvents(withStart: range.start, end: range.end, calendars: nil)
+        // Blob's own calendar is already shown from Blob's data.
+        let calendars = store.calendars(for: .event).filter { $0.title != AppleSync.calendarName }
+        guard !calendars.isEmpty else { return [] }
+        let predicate = store.predicateForEvents(withStart: range.start, end: range.end, calendars: calendars)
         return store.events(matching: predicate).map { e in
             EventOccurrence(id: "ek:\(e.calendarItemIdentifier)@\(Int(e.startDate.timeIntervalSince1970))", eventID: nil,
                             title: e.title ?? "Busy", start: e.startDate, end: e.endDate, isAllDay: e.isAllDay,

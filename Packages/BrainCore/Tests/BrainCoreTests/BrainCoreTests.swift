@@ -275,3 +275,146 @@ final class AssignmentVsEventTests: XCTestCase {
         XCTAssertEqual(parse("calc problem set tomorrow", courses: ["AP Calculus BC"]).course, "AP Calculus BC")
     }
 }
+
+final class TrackingTests: XCTestCase {
+    var cal: Calendar = {
+        var c = Calendar(identifier: .gregorian)
+        c.timeZone = TimeZone(identifier: "America/Los_Angeles")!
+        return c
+    }()
+    func d(_ m: Int, _ day: Int, _ h: Int = 0) -> Date { cal.date(from: DateComponents(year: 2026, month: m, day: day, hour: h))! }
+
+    func testOldFilesStillLoad() throws {
+        let json = #"{"id":"6F1C3E9A-1111-4222-8333-944455556666","title":"Old","estimatedMinutes":30,"difficulty":2,"priority":1,"source":"manual","isCompleted":false,"estimateIsUserSet":false,"updatedAt":10,"deleted":false}"#
+        let t = try JSONDecoder().decode(BrainTask.self, from: Data(json.utf8))
+        XCTAssertEqual(t.title, "Old")
+        XCTAssertTrue(t.milestones.isEmpty)
+        XCTAssertNil(t.createdAt)
+        let block = #"{"id":"6F1C3E9A-1111-4222-8333-944455556666","kind":"task","title":"x","start":0,"end":60,"isDone":false}"#
+        XCTAssertNil(try JSONDecoder().decode(PlanBlock.self, from: Data(block.utf8)).milestoneID)
+    }
+
+    func testSuggestedStepsFitBeforeDue() {
+        let steps = MilestonePlanner.suggest(title: "History research essay", start: d(10, 19, 16), due: d(11, 2, 23), totalMinutes: 300, calendar: cal)
+        XCTAssertEqual(steps.map(\.title).first, "Research & sources")
+        XCTAssertEqual(steps.count, 5)
+        XCTAssertEqual(steps.last?.due, d(11, 2, 23))
+        let dates = steps.compactMap(\.due)
+        XCTAssertEqual(dates, dates.sorted())
+        XCTAssertTrue(dates.dropLast().allSatisfy { $0 <= d(11, 1, 23) }, "steps finish a day early")
+        XCTAssertEqual(steps.reduce(0) { $0 + $1.estimatedMinutes }, 300)
+    }
+
+    func testProgressAndPace() {
+        var t = BrainTask(title: "Essay", due: d(10, 31, 23), startDate: d(10, 17), createdAt: d(10, 17))
+        t.milestones = [Milestone(title: "A", due: d(10, 22), estimatedMinutes: 60),
+                        Milestone(title: "B", due: d(10, 27), estimatedMinutes: 120),
+                        Milestone(title: "C", due: d(10, 31), estimatedMinutes: 60)]
+        XCTAssertTrue(t.isLongTerm)
+        XCTAssertEqual(t.progress, 0)
+        XCTAssertEqual(t.pace(now: d(10, 18), calendar: cal), .notStarted)
+        XCTAssertEqual(t.pace(now: d(10, 24), calendar: cal), .behind, "step A's date passed")
+        t.milestones[0].isDone = true
+        XCTAssertEqual(t.progress, 0.25, accuracy: 0.001)
+        XCTAssertEqual(t.pace(now: d(10, 18), calendar: cal), .ahead)
+        XCTAssertEqual(t.pace(now: d(10, 20), calendar: cal), .onTrack)
+        XCTAssertEqual(t.remainingMinutes, 180)
+        XCTAssertEqual(t.pace(now: d(11, 1), calendar: cal), .overdue)
+    }
+
+    func testGradeAverageIsPointWeighted() {
+        let a = BrainTask(title: "Quiz", course: "Chem", isCompleted: true, pointsEarned: 9, maxPoints: 10)
+        let b = BrainTask(title: "Test", course: "Chem", isCompleted: true, pointsEarned: 70, maxPoints: 100)
+        let s = CourseSummary.build([a, b]).first!
+        XCTAssertEqual(s.averageGrade!, 79 / 110 * 100, accuracy: 0.01)
+        XCTAssertEqual(s.gradedCount, 2)
+    }
+
+    func testPlannerDoesTodaysShareOfABigProject() {
+        let now = d(10, 19, 16)
+        var project = BrainTask(title: "Science fair project", due: d(10, 30, 23), estimatedMinutes: 600)
+        project.createdAt = d(10, 15)
+        let plan = Scheduler(settings: PlannerSettings(), calendar: cal).makePlan(checkIn: now, tasks: [project], busy: [])
+        let work = plan.blocks.filter { $0.kind == .task }
+        let minutes = work.reduce(0) { $0 + $1.minutes }
+        XCTAssertGreaterThanOrEqual(minutes, 50)
+        XCTAssertLessThan(minutes, 120, "spread over the days left, not 10 hours tonight")
+        XCTAssertTrue(work.allSatisfy { $0.sessionOnly == true })
+    }
+
+    func testPlannerWorksOnNextStep() {
+        let now = d(10, 19, 16)
+        var essay = BrainTask(title: "Essay", due: d(10, 30, 23))
+        let step = Milestone(title: "Outline", due: d(10, 20, 21), estimatedMinutes: 40)
+        essay.milestones = [step, Milestone(title: "Draft", due: d(10, 28), estimatedMinutes: 90)]
+        let plan = Scheduler(settings: PlannerSettings(), calendar: cal).makePlan(checkIn: now, tasks: [essay], busy: [])
+        let work = plan.blocks.filter { $0.kind == .task }
+        XCTAssertEqual(work.first?.title, "Essay — Outline")
+        XCTAssertEqual(work.first?.milestoneID, step.id)
+        XCTAssertEqual(work.reduce(0) { $0 + $1.minutes }, 40, "due tomorrow, so the whole step")
+    }
+
+    func testWorkloadSpreadsOverDays() {
+        let now = d(10, 19, 9)
+        let t = BrainTask(title: "Big", due: d(10, 23, 23), estimatedMinutes: 240)
+        let days = Workload.perDay([t], from: now, days: 7, calendar: cal)
+        XCTAssertEqual(days.count, 7)
+        XCTAssertEqual(days.prefix(4).map(\.minutes), [60, 60, 60, 60])
+        XCTAssertEqual(days[4].minutes, 0, "keeps the due day free")
+    }
+}
+
+final class ProgressLogTests: XCTestCase {
+    let p = ProgressLogParser()
+
+    func testWorkedTime() {
+        XCTAssertEqual(p.parse("worked 45 min on the history essay"), .worked(minutes: 45, query: "history essay", note: nil))
+        XCTAssertEqual(p.parse("I spent 2 hours on my chem lab"), .worked(minutes: 120, query: "chem lab", note: nil))
+        XCTAssertEqual(p.parse("did an hour of calc homework"), .worked(minutes: 60, query: "calc homework", note: nil))
+        XCTAssertEqual(p.parse("worked on the science fair project for 1.5 hours"), .worked(minutes: 90, query: "science fair project", note: nil))
+        XCTAssertEqual(p.parse("Hey Blob, log 30 minutes on english essay - wrote the intro"), .worked(minutes: 30, query: "english essay", note: "wrote the intro"))
+        XCTAssertEqual(p.parse("studied for 40 minutes for the bio test"), .worked(minutes: 40, query: "bio test", note: nil))
+        XCTAssertEqual(p.parse("worked for half an hour"), .worked(minutes: 30, query: "", note: nil))
+    }
+
+    func testStepsAndCompletion() {
+        XCTAssertEqual(p.parse("finished the outline for my english essay"), .finishedStep(step: "outline", query: "english essay"))
+        XCTAssertEqual(p.parse("done with the rough draft of the history paper"), .finishedStep(step: "rough draft", query: "history paper"))
+        XCTAssertEqual(p.parse("turned in the chem lab"), .completed(query: "chem lab"))
+        XCTAssertEqual(p.parse("I finished my spanish worksheet"), .completed(query: "spanish worksheet"))
+        XCTAssertEqual(p.parse("calc problem set is done"), .completed(query: "calc problem set"))
+        XCTAssertEqual(p.parse("started the history project"), .started(query: "history project"))
+    }
+
+    func testGradesAndPercent() {
+        XCTAssertEqual(p.parse("got 92/100 on the chem lab"), .grade(earned: 92, possible: 100, query: "chem lab"))
+        XCTAssertEqual(p.parse("I got 18 out of 20 on the spanish quiz"), .grade(earned: 18, possible: 20, query: "spanish quiz"))
+        XCTAssertEqual(p.parse("got a 95 on the bio test"), .grade(earned: 95, possible: 100, query: "bio test"))
+        XCTAssertEqual(p.parse("got an A- on my essay"), .grade(earned: 92, possible: 100, query: "essay"))
+        XCTAssertEqual(p.parse("history essay is 60% done"), .progress(percent: 60, query: "history essay"))
+        XCTAssertEqual(p.parse("I'm halfway through the english essay"), .progress(percent: 50, query: "english essay"))
+        XCTAssertEqual(p.parse("break the science project into steps"), .planSteps(query: "science project"))
+    }
+
+    func testNewThingsAreNotLogs() {
+        XCTAssertNil(p.parse("finish the essay by friday"))
+        XCTAssertNil(p.parse("history essay due friday"))
+        XCTAssertNil(p.parse("soccer practice tomorrow 5pm"))
+        XCTAssertNil(p.parse("read chapter 4"))
+    }
+
+    func testMatcher() {
+        let essay = BrainTask(title: "Unit 3 DBQ Essay", course: "AP World History", due: Date().addingTimeInterval(86_400 * 5))
+        let lab = BrainTask(title: "Titration Lab Report", course: "Chemistry Honors", due: Date().addingTimeInterval(86_400 * 2))
+        let quiz = BrainTask(title: "Vocab quiz 7", course: "Spanish 3")
+        XCTAssertEqual(TaskMatcher.best("history essay", in: [essay, lab, quiz])?.id, essay.id)
+        XCTAssertEqual(TaskMatcher.best("chem lab", in: [essay, lab, quiz])?.id, lab.id)
+        XCTAssertEqual(TaskMatcher.best("spanish quiz", in: [essay, lab, quiz])?.id, quiz.id)
+        XCTAssertNil(TaskMatcher.best("piano recital", in: [essay, lab, quiz]))
+        XCTAssertEqual(TaskMatcher.best("", in: [essay, lab, quiz])?.id, lab.id, "empty = soonest due")
+        var e = essay
+        e.milestones = [Milestone(title: "Research & sources"), Milestone(title: "Outline"), Milestone(title: "Rough draft")]
+        XCTAssertEqual(TaskMatcher.step("rough draft", in: e)?.title, "Rough draft")
+        XCTAssertEqual(TaskMatcher.step("research", in: e)?.title, "Research & sources")
+    }
+}

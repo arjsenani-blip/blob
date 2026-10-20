@@ -248,6 +248,30 @@ enum WindowSnapshot {
             view.cacheDisplay(in: view.bounds, to: rep)
             try? rep.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: "\(prefix)-\(t.rawValue).png"))
         }
+        // The assignment tracker's other views.
+        select(.tasks)
+        for mode in ["Long-term", "Classes"] {
+            UserDefaults.standard.set(mode, forKey: "assignmentsMode")
+            try? await Task.sleep(for: .seconds(1.5))
+            guard let view = NSApplication.shared.windows.first(where: { $0.canBecomeMain })?.contentView,
+                  let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) else { continue }
+            view.cacheDisplay(in: view.bounds, to: rep)
+            try? rep.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: "\(prefix)-tasks-\(mode).png"))
+        }
+        UserDefaults.standard.set("Upcoming", forKey: "assignmentsMode")
+        if let t = store.pendingTasks.filter({ !$0.milestones.isEmpty }).min(by: { ($0.due ?? .distantFuture) > ($1.due ?? .distantFuture) }) {
+            let host = NSHostingView(rootView: AssignmentDetail(taskID: t.id).environmentObject(store))
+            let win = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 600, height: 1100), styleMask: [.titled], backing: .buffered, defer: false)
+            win.contentView = host
+            win.orderFront(nil)
+            try? await Task.sleep(for: .seconds(1.5))
+            if let rep = host.bitmapImageRepForCachingDisplay(in: host.bounds) {
+                host.cacheDisplay(in: host.bounds, to: rep)
+                try? rep.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: "\(prefix)-detail.png"))
+            }
+            win.close()
+        }
+        if UserDefaults.standard.bool(forKey: "snapshotOnlyWindow") { NSApplication.shared.terminate(nil); return }
         let buddy = BuddyController.shared
         let stages: [(String, () -> Void)] = [
             ("buddy-1-sleepy", { buddy.stage(.awake, sleeping: true) }),

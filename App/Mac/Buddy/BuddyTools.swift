@@ -102,8 +102,13 @@ final class BuddyTools {
                  ["title", "start"]),
             tool("add_task", "Add a to-do or assignment to Blob's Brain.",
                  ["title": str("What to do"), "due": str("Local due time YYYY-MM-DDTHH:MM, optional"),
-                  "course": str("Class name, optional"), "estimate_minutes": int("How long it takes, optional")], ["title"]),
+                  "course": str("Class name, optional"), "estimate_minutes": int("How long it takes, optional"),
+                  "long_term": bool("A big assignment worked on over days or weeks (project, essay, studying for a test) — Blob splits it into dated steps")], ["title"]),
             tool("complete_task", "Mark a to-do/assignment as done.", ["title": str("Title (or close match) of the task")], ["title"]),
+            tool("log_progress", "Log progress on an assignment from a plain sentence, e.g. 'worked 45 min on the history essay', 'finished the outline for my english essay', 'got 92/100 on the chem lab', 'history project is 60% done', 'break the science project into steps'. Pass the user's words.",
+                 ["sentence": str("What the user said they did")], ["sentence"]),
+            tool("assignment_status", "How the user's long-term assignments are going (progress, on pace or behind, next step, time per day needed). Give a title for one assignment, or leave empty for all.",
+                 ["title": str("Assignment (optional)")]),
             tool("check_in", "Check the user in: builds their timeline of what to work on from now until bedtime and returns it."),
             tool("set_timer", "Start a timer; Blob speaks and notifies when it finishes.",
                  ["minutes": ["type": "number", "description": "Length in minutes (can be fractional)"] as [String: Any], "label": str("What it's for")], ["minutes"]),
@@ -145,6 +150,8 @@ final class BuddyTools {
         case "add_event": return addEvent(input)
         case "add_task": return addTask(input)
         case "complete_task": return completeTask(s("title") ?? "")
+        case "log_progress": return logProgress(s("sentence") ?? "")
+        case "assignment_status": return assignmentStatus(s("title"))
         case "check_in": return checkIn()
         case "set_timer": return setTimer(minutes: (input["minutes"] as? NSNumber)?.doubleValue ?? 0, label: s("label"))
         default: return .error("Unknown tool \(name)")
@@ -605,7 +612,9 @@ final class BuddyTools {
         guard !list.isEmpty else { return ToolOutput(text: "No open to-dos or assignments.") }
         return ToolOutput(text: list.map { t in
             "- \(t.title)" + (t.course.map { " [\($0)]" } ?? "") + (t.due.map { " due \($0.dueText())" } ?? " (no due date)")
-                + " · ~\(t.estimatedMinutes) min" + (t.isCompleted ? " ✓ done" : "")
+                + " · ~\(t.remainingMinutes) min left" + (t.isCompleted ? " ✓ done" : "")
+                + (t.isLongTerm && !t.isCompleted ? " · long-term \(Int(t.progress * 100))% \(t.pace().label)" + (t.nextMilestone.map { ", next: \($0.title)" } ?? "") : "")
+                + (t.percentGrade.map { " · grade \(Int($0.rounded()))%" } ?? "")
         }.joined(separator: "\n"))
     }
 
@@ -625,20 +634,44 @@ final class BuddyTools {
         guard let title = input["title"] as? String, !title.isEmpty else { return .error("Need a title.") }
         let due = Self.parseDate(input["due"] as? String).map { $0.allDay ? Calendar.current.date(bySettingHour: 23, minute: 59, second: 0, of: $0.date)! : $0.date }
         let est = (input["estimate_minutes"] as? NSNumber)?.intValue
-        store.upsert(BrainTask(title: title, course: input["course"] as? String, due: due, estimatedMinutes: est ?? 30,
-                               estimateIsUserSet: est != nil))
+        let t = BrainTask(title: title, course: input["course"] as? String, due: due, estimatedMinutes: est ?? 30,
+                          estimateIsUserSet: est != nil)
+        store.upsert(t)
+        store.setUpLongTermIfNeeded(t.id, explicit: input["long_term"] as? Bool ?? false)
+        if let saved = store.task(t.id), !saved.milestones.isEmpty {
+            return ToolOutput(text: "Added \(title)" + (due.map { ", due \($0.dueText())" } ?? "") + ", tracked long-term in steps: "
+                + saved.milestones.map { "\($0.title)" + ($0.due.map { " by \($0.dueText(includeTime: false))" } ?? "") }.joined(separator: "; ") + ".")
+        }
         return ToolOutput(text: "Added to-do \(title)" + (due.map { ", due \($0.dueText())" } ?? "") + ".")
     }
 
     func completeTask(_ query: String) -> ToolOutput {
-        let q = query.lowercased()
-        let open = store.pendingTasks
-        guard let t = open.first(where: { $0.title.lowercased() == q })
-                ?? open.first(where: { $0.title.lowercased().contains(q) || q.contains($0.title.lowercased()) }) else {
-            return .error("No open task matches \"\(query)\". Open tasks: " + open.prefix(15).map(\.title).joined(separator: "; "))
+        guard var t = TaskMatcher.best(query, in: store.pendingTasks) else {
+            return .error("No open task matches \"\(query)\". Open tasks: " + store.pendingTasks.prefix(15).map(\.title).joined(separator: "; "))
         }
-        store.toggle(t)
+        store.markDone(&t)
+        store.upsert(t)
         return ToolOutput(text: "Marked \(t.title) done.")
+    }
+
+    func logProgress(_ sentence: String) -> ToolOutput {
+        guard ProgressLogParser().parse(sentence) != nil else {
+            return .error("Couldn't read that as progress. Phrase it like 'worked 30 min on X', 'finished the outline for X', 'got 18/20 on X', 'X is 50% done'.")
+        }
+        let msg = store.applyLog(sentence) ?? ""
+        return msg.hasPrefix("I couldn't") ? .error(msg + " Open assignments: " + store.pendingTasks.prefix(15).map(\.title).joined(separator: "; ")) : ToolOutput(text: msg)
+    }
+
+    func assignmentStatus(_ title: String?) -> ToolOutput {
+        guard let title, !title.isEmpty else { return ToolOutput(text: store.trackerSummary()) }
+        guard let t = TaskMatcher.best(title, in: store.tasks) else { return .error("No assignment matches \"\(title)\".") }
+        var lines = ["\(t.title)" + (t.course.map { " [\($0)]" } ?? "") + ": \(Int(t.progress * 100))% done, \(t.pace().label)."]
+        if let d = t.due { lines.append("Due \(d.dueText()).") }
+        lines.append("Logged \(Scheduler.durationText(t.loggedMinutes)), about \(Scheduler.durationText(t.remainingMinutes)) left.")
+        if let need = t.minutesPerDayNeeded() { lines.append("Needs about \(Scheduler.durationText(need)) a day.") }
+        for m in t.milestones { lines.append("- \(m.isDone ? "✓" : "○") \(m.title)" + (m.due.map { " by \($0.dueText(includeTime: false))" } ?? "")) }
+        if let g = t.percentGrade { lines.append("Grade: \(Int(g.rounded()))%.") }
+        return ToolOutput(text: lines.joined(separator: "\n"))
     }
 
     func checkIn() -> ToolOutput {
