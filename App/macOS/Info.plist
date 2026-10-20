@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>BlobSourceRoot</key>
+	<string>$(SRCROOT)</string>
+	<key>CFBundleDevelopmentRegion</key>
+	<string>$(DEVELOPMENT_LANGUAGE)</string>
+	<key>CFBundleDisplayName</key>
+	<string>Blob</string>
+	<key>CFBundleExecutable</key>
+	<string>$(EXECUTABLE_NAME)</string>
+	<key>CFBundleIdentifier</key>
+	<string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
+	<key>CFBundleInfoDictionaryVersion</key>
+	<string>6.0</string>
+	<key>CFBundleName</key>
+	<string>Blob</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+	<key>CFBundleShortVersionString</key>
+	<string>$(MARKETING_VERSION)</string>
+	<key>CFBundleVersion</key>
+	<string>$(CURRENT_PROJECT_VERSION)</string>
+	<key>LSApplicationCategoryType</key>
+	<string>public.app-category.productivity</string>
+	<key>NSAppleEventsUsageDescription</key>
+	<string>Blob controls apps like Music, Spotify and your browser when you ask it to.</string>
+	<key>NSCalendarsFullAccessUsageDescription</key>
+	<string>Shows your Apple Calendar events alongside your plan so homework isn't scheduled on top of them.</string>
+	<key>NSHumanReadableCopyright</key>
+	<string>Made for Arjun</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Blob listens when you click it or press its shortcut, so you can talk to it.</string>
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>Blob turns what you say into text, on your Mac.</string>
+</dict>
+</plist>

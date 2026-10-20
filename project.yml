@@ -1,0 +1,79 @@
+name: ArjunsBrain
+options:
+  bundleIdPrefix: com.arjunsenani
+  deploymentTarget:
+    iOS: "17.0"
+    macOS: "26.0"
+  createIntermediateGroups: true
+settings:
+  base:
+    SWIFT_VERSION: "5.0"
+    MARKETING_VERSION: "1.0"
+    CURRENT_PROJECT_VERSION: "1"
+    DEVELOPMENT_TEAM: 849KV8NKVN
+    PRODUCT_BUNDLE_IDENTIFIER: com.arjunsenani.brain
+    ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+    ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
+    GENERATE_INFOPLIST_FILE: NO
+packages:
+  BrainCore:
+    path: Packages/BrainCore
+targets:
+  ArjunsBrain-macOS:
+    type: application
+    platform: macOS
+    sources:
+      - App/Shared
+      - App/Mac
+      - App/Resources
+    dependencies:
+      - package: BrainCore
+    info:
+      path: App/macOS/Info.plist
+      properties:
+        CFBundleName: Blob
+        CFBundleDisplayName: Blob
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        LSApplicationCategoryType: public.app-category.productivity
+        NSCalendarsFullAccessUsageDescription: Shows your Apple Calendar events alongside your plan so homework isn't scheduled on top of them.
+        NSHumanReadableCopyright: Made for Arjun
+        BlobSourceRoot: $(SRCROOT)
+        NSMicrophoneUsageDescription: Blob listens when you click it or press its shortcut, so you can talk to it.
+        NSSpeechRecognitionUsageDescription: Blob turns what you say into text, on your Mac.
+        NSAppleEventsUsageDescription: Blob controls apps like Music, Spotify and your browser when you ask it to.
+    settings:
+      base:
+        PRODUCT_NAME: ArjunsBrain
+        CODE_SIGN_STYLE: Manual
+        CODE_SIGN_IDENTITY: Apple Development
+        PROVISIONING_PROFILE_SPECIFIER: ""
+        ENABLE_HARDENED_RUNTIME: NO
+        COMBINE_HIDPI_IMAGES: YES
+  ArjunsBrain-iOS:
+    type: application
+    platform: iOS
+    sources:
+      - App/Shared
+      - App/Resources
+    dependencies:
+      - package: BrainCore
+    info:
+      path: App/iOS/Info.plist
+      properties:
+        CFBundleName: Blob
+        CFBundleDisplayName: Blob
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        UILaunchScreen: {}
+        UIApplicationSceneManifest:
+          UIApplicationSupportsMultipleScenes: false
+        UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait, UIInterfaceOrientationLandscapeLeft, UIInterfaceOrientationLandscapeRight]
+        UISupportedInterfaceOrientations~ipad: [UIInterfaceOrientationPortrait, UIInterfaceOrientationPortraitUpsideDown, UIInterfaceOrientationLandscapeLeft, UIInterfaceOrientationLandscapeRight]
+        NSCalendarsFullAccessUsageDescription: Shows your Apple Calendar events alongside your plan so homework isn't scheduled on top of them.
+        ITSAppUsesNonExemptEncryption: false
+    settings:
+      base:
+        PRODUCT_NAME: ArjunsBrain
+        CODE_SIGN_STYLE: Automatic
+        TARGETED_DEVICE_FAMILY: "1,2"
