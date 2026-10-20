@@ -1,0 +1,21 @@
+{
+  "name": "blob",
+  "version": "1.0.0",
+  "description": "Blob \u2014 your planner and voice assistant, for Windows",
+  "main": "src/main.js",
+  "scripts": {
+    "start": "electron .",
+    "test": "node --test test/parser.test.js test/core.test.js",
+    "dist": "electron-builder --win --x64"
+  },
+  "author": "Arjun Senani",
+  "license": "UNLICENSED",
+  "dependencies": {
+    "sherpa-onnx-node": "^1.13.8"
+  },
+  "devDependencies": {
+    "electron": "^44.9.2",
+    "electron-builder": "^26.15.3"
+  },
+  "productName": "Blob"
+}

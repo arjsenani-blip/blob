@@ -11,3 +11,7 @@ ArjunsBrain.xcodeproj/
 # macOS / Xcode
 .DS_Store
 xcuserdata/
+
+# Windows app
+windows/node_modules/
+windows/dist/
