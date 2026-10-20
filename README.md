@@ -9,9 +9,13 @@ One app for your calendar, assignments, and a timeline for what to do right now.
 | | |
 |---|---|
 | **Quick add** | Type normally and a live preview shows how it'll be saved. `Dentist tomorrow 3pm` · `Soccer every tue & thu 5-7pm @ Lincoln Field` · `Essay due fri ~90m #English` · `Call grandma in 2 hours` · `todo buy poster board !!`. It runs on-device, so you don't need an API key. |
-| **Calendar** | Month grid plus a day agenda. Events can repeat (daily, weekdays, weekly on chosen days, or monthly), and you can delete a single repeat. It can also show your Apple Calendar events read-only. |
-| **Google Classroom** | Pulls in assignments from your active classes with their due dates, and marks the ones you've turned in as done. Read-only. |
-| **Check in** | Builds a timeline from now until bedtime: it skips around your events, adds breaks, and orders work by urgency and by the time of day you checked in. Anything that won't fit gets flagged. Pressing ▶ / ✓ tracks how long you actually took, and future estimates for that class get better. |
+| **Calendar** | Month grid plus a day agenda. Events can repeat (daily, weekdays, weekly on chosen days, or monthly), and you can delete a single repeat. Shows your Apple Calendar and Google Calendar events too. |
+| **Long-term tracker** | Big assignments (projects, essays, studying for a test) get **dated steps**, a **work log**, **progress**, and a **pace**: ahead, on track, behind or at risk. Add one with `History project due nov 20 long-term`, or it happens automatically for big work. Assignments has **Upcoming / Long-term / Classes / Done** views: a 2-week workload chart, grade averages per class, and a detail page for every assignment. |
+| **Log in plain English** | Type it, or just tell Blob: `worked 45 min on the history essay` · `finished the outline for my english essay` · `got 92/100 on the chem lab` · `history project is 60% done` · `break the science project into steps`. Ask Blob *"am I on track?"* or *"how's my history project going?"* |
+| **Apple Calendar** (Mac + iPhone) | Assignments show up **as tasks in the Calendar app**, through a *Blob* list in Reminders. Ticking one off there marks it done in Blob. Blob's events can go into a *Blob* calendar. Turn it on in Settings → Apple Calendar. |
+| **Google Calendar** | Shows the calendars you have on in Google Calendar. It can add Blob's events to your Google Calendar, and add assignments as **Google Tasks**, which show as tasks in Google Calendar. Ticking one off there marks it done in Blob. |
+| **Google Classroom** | Pulls in assignments from your active classes, with due dates, turned-in and late status, and **grades** once they're returned. It keeps a semester of graded history and splits big assignments into steps automatically. Read-only: it never changes anything in Classroom. |
+| **Check in** | Builds a timeline from now until bedtime: it skips around your events, adds breaks, and orders work by urgency and by the time of day you checked in. Long-term assignments get their **next step** or **today's share**, so they move forward a bit every day instead of all the night before. Anything that won't fit gets flagged. Pressing ▶ / ✓ logs how long you actually took. |
 | **Sync** | Mac and iPhone sync through a hidden app-data folder in Google Drive. If you edit on both, each item keeps the newest edit. |
 | **Mac extras** | Menu-bar panel for quick add and up next, plus ⌘K quick add, ⌘I check in, and ⌘R sync. Reminders before events and when each work block starts. |
 
@@ -45,6 +49,8 @@ Blob is the glowing cyan blob tucked into the bottom-right corner of your screen
 - "pause"
 - "what's on my schedule"
 - "check me in"
+- "I worked an hour on the science fair project"
+- "am I on track?"
 - "set a timer for 25 minutes"
 - "what's on my screen?"
 - "click the Sign In button"
@@ -78,7 +84,7 @@ Blob is Mac-only. iPhones don't allow an app to control the rest of the phone.
 
 The `windows/` folder is the Windows version: the corner Blob plus the **Blob's Brain** planner. It uses the same synced data as the Mac and iPhone.
 
-- **Install:** run `Blob-Setup-1.0.0.exe`. The installer isn't code-signed, so Windows shows "Windows protected your PC" the first time. Click **More info → Run anyway**.
+- **Install:** run `Blob-Setup-1.1.0.exe` from the [latest release](https://github.com/arjsenani-blip/blob/releases/latest). The installer isn't code-signed, so Windows shows "Windows protected your PC" the first time. Click **More info → Run anyway**.
 - **Talk:** press **Ctrl+Shift+B** anywhere, or click Blob in the bottom-right corner. Right-click Blob to open Blob's Brain. Blob also lives in the system tray.
 - **Voice:** the first time you talk, Blob offers to download its offline voice and hearing (about 380 MB, one time). It uses the same Daniel voice as the Mac, and Moonshine for speech recognition, both running on your PC. Until then you can type, and Blob answers with Windows' built-in voice.
 - **Brain:** instant commands work offline: open apps and sites, YouTube, music, search, volume and media keys, timers, schedule, check-in, adding assignments and events. Everything else goes to **Claude Code on your Pro plan** (install Claude Code on the PC and sign in). Replies stream, so Blob starts talking right away.
@@ -89,13 +95,14 @@ The `windows/` folder is the Windows version: the corner Blob plus the **Blob's 
   cd windows && npm install && npm test && npm run dist
   ```
 
-  This makes `windows/dist/Blob-Setup-1.0.0.exe`. It builds on a Mac too.
+  This makes `windows/dist/Blob-Setup-<version>.exe`. It builds on a Mac too.
+- **Tracker & calendars:** the long-term tracker, plain-English logging (typed or spoken), Google Calendar and Google Tasks all work on Windows too. Apple Calendar is Mac and iPhone only.
 
 ---
 
 ## 1. Install on your Mac
 
-Open **`Blob.dmg`** and drag the app into Applications.
+Download **`Blob.dmg`** from the [latest release](https://github.com/arjsenani-blip/blob/releases/latest), open it, and drag the app into Applications (replace the old one when updating). The first time, right-click Blob → Open, because the app isn't notarized.
 
 To rebuild after changing code, run `./scripts/build_dmg.sh` (it needs Xcode and `brew install xcodegen`).
 
@@ -119,11 +126,12 @@ To rebuild after changing code, run `./scripts/build_dmg.sh` (it needs Xcode and
 Google needs an ID for the app before it can read Classroom or Drive:
 
 1. Go to [console.cloud.google.com](https://console.cloud.google.com) and create a project called *Blob*.
-2. **APIs & Services → Library**: enable **Google Classroom API** and **Google Drive API**.
+2. **APIs & Services → Library**: enable **Google Classroom API**, **Google Drive API**, **Google Calendar API** and **Google Tasks API**.
 3. **OAuth consent screen**: choose External, enter the app name and your email. Under **Test users**, add your **school email** and your personal Gmail.
 4. **Credentials → Create credentials → OAuth client ID**, type **iOS**, bundle ID `com.arjunsenani.brain`.
 5. Copy the client ID and paste it into **Settings → Google setup** in the app, on both the Mac and the iPhone.
 6. On both devices, go to **Settings → Google Classroom → Sign in with Google** and use your school account.
+7. For Google Calendar: in **Settings → Google Calendar**, click **Connect Google Calendar** on the account whose calendar you use, then pick what to sync.
 
 **If your school account gets blocked:** some school Google admins don't allow outside apps. If Classroom sign-in fails, ask your school's IT to allow the app (there's no way around that part). If Classroom works but Drive is blocked, sign a personal Gmail into **Separate sync account** on both devices.
 
@@ -140,13 +148,15 @@ Google needs an ID for the app before it can read Classroom or Drive:
 ## Project layout
 
 ```
-Packages/BrainCore/        Pure Swift logic + 25 unit tests (cd there and run `swift test`)
+Packages/BrainCore/        Pure Swift logic + 40 unit tests (cd there and run `swift test`)
   NaturalLanguageParser    quick-add parsing
+  ProgressLog              plain-English progress logging + matching your words to an assignment
+  Tracking                 steps, progress, pace, grades, workload
   Scheduler                check-in timeline
   SyncMerger / Models      data + newest-wins merge
 App/Mac/Blob/             Blob: corner panel + blob, voice, Claude / on-device brains, Mac tools
 App/Shared/                SwiftUI app shared by Mac and iOS
-  Services/                Google sign-in (PKCE), Classroom, Drive sync, Apple Calendar, reminders
+  Services/                Google sign-in (PKCE), Classroom, Drive sync, Google Calendar/Tasks, Apple Calendar/Reminders sync
   Store/BrainStore         app state, saves to ~/Library/Application Support/ArjunsBrain
   Views/                   Today, Calendar, Assignments, Settings, editors, theme
 project.yml                XcodeGen spec (run `xcodegen generate` after adding files)
