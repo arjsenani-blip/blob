@@ -24,6 +24,10 @@
 	<false/>
 	<key>NSCalendarsFullAccessUsageDescription</key>
 	<string>Shows your Apple Calendar events alongside your plan so homework isn't scheduled on top of them.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Blob listens when you tap it, so you can talk to it.</string>
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>Blob turns what you say into text, on your iPhone.</string>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>

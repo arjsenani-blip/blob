@@ -2,7 +2,7 @@ name: ArjunsBrain
 options:
   bundleIdPrefix: com.arjunsenani
   deploymentTarget:
-    iOS: "17.0"
+    iOS: "26.0"
     macOS: "26.0"
   createIntermediateGroups: true
 settings:
@@ -55,6 +55,7 @@ targets:
     platform: iOS
     sources:
       - App/Shared
+      - App/iPhone
       - App/Resources
     dependencies:
       - package: BrainCore
@@ -72,6 +73,8 @@ targets:
         UISupportedInterfaceOrientations~ipad: [UIInterfaceOrientationPortrait, UIInterfaceOrientationPortraitUpsideDown, UIInterfaceOrientationLandscapeLeft, UIInterfaceOrientationLandscapeRight]
         NSCalendarsFullAccessUsageDescription: Shows your Apple Calendar events alongside your plan so homework isn't scheduled on top of them.
         ITSAppUsesNonExemptEncryption: false
+        NSMicrophoneUsageDescription: Blob listens when you tap it, so you can talk to it.
+        NSSpeechRecognitionUsageDescription: Blob turns what you say into text, on your iPhone.
     settings:
       base:
         PRODUCT_NAME: ArjunsBrain

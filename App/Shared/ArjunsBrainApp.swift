@@ -71,6 +71,9 @@ enum AppTab: String, CaseIterable, Identifiable {
 struct RootView: View {
     @EnvironmentObject var store: BrainStore
     @State private var tab: AppTab? = .today
+    #if os(iOS)
+    @StateObject private var phoneBlob = PhoneBlob(store: BrainStore.shared)
+    #endif
 
     var body: some View {
         container
@@ -129,6 +132,7 @@ struct RootView: View {
                     .tag(t)
             }
         }
+        .overlay(alignment: .bottomTrailing) { PhoneBlobOverlay(blob: phoneBlob) }
         #endif
     }
 }

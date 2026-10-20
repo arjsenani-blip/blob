@@ -1,13 +1,6 @@
 import SwiftUI
 import AppKit
 
-enum BuddyColors {
-    static let cyan = Color(red: 0.0, green: 0.86, blue: 1.0)
-    static let light = Color(red: 0.72, green: 1.0, blue: 1.0)
-    static let deep = Color(red: 0.0, green: 0.48, blue: 0.70)
-    static let amber = Color(red: 1.0, green: 0.72, blue: 0.2)
-    static let red = Color(red: 1.0, green: 0.35, blue: 0.4)
-}
 
 /// Everything inside the corner panel: the bubble on top, Blob in the bottom-right.
 struct BuddyOverlay: View {
