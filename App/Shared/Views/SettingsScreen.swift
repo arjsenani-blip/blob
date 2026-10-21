@@ -90,6 +90,10 @@ struct SettingsScreen: View {
 
             AppleCalendarSection(systemCalendar: systemCalendar)
 
+            #if os(macOS)
+            TickTickSection()
+            #endif
+
             Section {
                 GoogleCalendarRows(school: school, personal: personal, clientMissing: clientID.isEmpty)
             } header: {
@@ -364,3 +368,96 @@ private struct AppleCalendarSection: View {
         #endif
     }
 }
+
+#if os(macOS)
+/// TickTick: homework ↔ a TickTick project (two-way). Needs a free developer app's ID and secret.
+private struct TickTickSection: View {
+    @EnvironmentObject var store: BrainStore
+    @ObservedObject private var account = TickTickAccount.shared
+    @AppStorage("tickTickClientID") private var clientID = ""
+    @AppStorage("tickTickClientSecret") private var clientSecret = ""
+    @State private var project = ""
+    @State private var showHelp = false
+    @State private var apiToken = ""
+
+    var body: some View {
+        Section {
+            if account.isSignedIn {
+                Toggle("Sync homework with TickTick", isOn: Binding(
+                    get: { store.tickTickOn }, set: { store.tickTickOn = $0; if $0 { Task { await store.syncTickTick() } } }))
+                if store.tickTickOn {
+                    TextField("TickTick project", text: $project, prompt: Text("Homework"))
+                        .onSubmit { store.tickTickProject = project; Task { await store.syncTickTick() } }
+                    Toggle("Tasks I add to that project become assignments", isOn: Binding(
+                        get: { store.tickTickImport }, set: { store.tickTickImport = $0 }))
+                    Button("Sync TickTick now") { Task { await store.syncTickTick() } }
+                }
+                Button("Disconnect TickTick", role: .destructive) { account.signOut(); store.tickTickOn = false }
+            } else {
+                HStack {
+                    SecureField("TickTick API token", text: $apiToken)
+                    Button("Connect") {
+                        Task {
+                            await account.useToken(apiToken)
+                            apiToken = ""
+                            if account.isSignedIn { store.tickTickOn = true; await store.syncTickTick() }
+                        }
+                    }
+                    .buttonStyle(.borderedProminent).tint(Brand.violet)
+                    .disabled(apiToken.isEmpty || account.isWorking)
+                }
+                Text("In TickTick (web or app): your avatar → **Settings → Account → API Token** → create one and paste it here.")
+                    .font(.caption).foregroundStyle(.secondary)
+                DisclosureGroup("Or use a developer app instead") {
+                TextField("Client ID", text: $clientID)
+                SecureField("Client secret", text: $clientSecret)
+                HStack {
+                    Button("How do I get these?") { showHelp = true }
+                    Spacer()
+                    if account.isWorking { ProgressView().controlSize(.small) }
+                    Button("Connect TickTick") {
+                        Task {
+                            await account.signIn()
+                            if account.isSignedIn { store.tickTickOn = true; await store.syncTickTick() }
+                        }
+                    }
+                    .buttonStyle(.bordered)
+                    .disabled(clientID.isEmpty || clientSecret.isEmpty || account.isWorking)
+                }
+                }
+            }
+            if let e = account.lastError ?? store.tickTickError { Text(e).font(.caption).foregroundStyle(.red) }
+        } header: {
+            Text("TickTick")
+        } footer: {
+            Text("Homework (picked by context, same as Reminders) goes into a TickTick project, with the steps of long-term work as checklist items. Complete a task or check a step in TickTick and Blob does the same. Your Mac does the syncing; your iPhone and PC get it through Blob's sync.")
+        }
+        .onAppear { project = store.tickTickProject == "Homework" ? "" : store.tickTickProject }
+        .sheet(isPresented: $showHelp) { TickTickHelp() }
+    }
+}
+
+private struct TickTickHelp: View {
+    @Environment(\.dismiss) private var dismiss
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Connect TickTick (2 minutes, once)").font(.title2.bold())
+            Text("1. Go to developer.ticktick.com and sign in with your TickTick account.")
+            Text("2. Click **Manage Apps** → **+App Name**, call it “Blob”.")
+            Text("3. Edit the app and set **OAuth redirect URL** to:")
+            HStack {
+                Text(TickTickAccount.redirectURI).font(.system(.body, design: .monospaced)).textSelection(.enabled)
+                Button("Copy") { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(TickTickAccount.redirectURI, forType: .string) }
+            }
+            Text("4. Copy the **Client ID** and **Client Secret** into Blob, then click **Connect TickTick**.")
+            HStack {
+                Link("Open developer.ticktick.com", destination: URL(string: "https://developer.ticktick.com/manage")!)
+                Spacer()
+                Button("Done") { dismiss() }.keyboardShortcut(.defaultAction)
+            }
+        }
+        .padding(24)
+        .frame(width: 520)
+    }
+}
+#endif

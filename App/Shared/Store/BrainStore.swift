@@ -46,6 +46,9 @@ final class BrainStore: ObservableObject {
     private var googleTask: Task<Void, Never>?
     let appleSync = AppleSync()
     private var appleSyncRunning = false
+    var tickTickRunning = false
+    @Published var tickTickError: String?
+    private var tickTickTask: Task<Void, Never>?
     /// When the last Apple sync wrote — its own Calendar/Reminders changes shouldn't trigger another sync.
     var lastAppleWrite = Date.distantPast
     private var appleTask: Task<Void, Never>?
@@ -90,7 +93,13 @@ final class BrainStore: ObservableObject {
         await syncEverything()
         timer?.invalidate()
         timer = Timer.scheduledTimer(withTimeInterval: 90, repeats: true) { [weak self] _ in
-            Task { @MainActor in await self?.syncDevices(); await self?.syncGoogle() }
+            Task { @MainActor in
+                await self?.syncDevices()
+                await self?.syncGoogle()
+                #if os(macOS)
+                await self?.syncTickTick()
+                #endif
+            }
         }
     }
 
@@ -103,6 +112,9 @@ final class BrainStore: ObservableObject {
         await syncDevices()
         await syncApple()
         await syncGoogle()
+        #if os(macOS)
+        await syncTickTick()
+        #endif
         if school.isSignedIn, (lastClassroomSync ?? .distantPast) < Date().addingTimeInterval(-10 * 60) {
             await syncClassroom()
         }
@@ -466,6 +478,16 @@ final class BrainStore: ObservableObject {
         save()
         rescheduleReminders()
         scheduleAppleSync()
+        #if os(macOS)
+        if UserDefaults.standard.bool(forKey: "tickTickOn") {
+            tickTickTask?.cancel()
+            tickTickTask = Task {
+                try? await Task.sleep(for: .seconds(5))
+                guard !Task.isCancelled else { return }
+                await syncTickTick()
+            }
+        }
+        #endif
         if googleEventsPushOn || googleTasksOn {
             googleTask?.cancel()
             googleTask = Task {
