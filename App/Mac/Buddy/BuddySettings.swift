@@ -169,6 +169,8 @@ struct BuddySettingsSection: View {
         }
         .task { claudePath = await ClaudeCodeBrain.findClaude() }
 
+        TrainingSettingsSection()
+
         Section {
             permissionRow("Microphone & Speech", granted: AVCaptureDevice.authorizationStatus(for: .audio) == .authorized,
                           pane: "Privacy_Microphone")

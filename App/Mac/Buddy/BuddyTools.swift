@@ -29,6 +29,10 @@ final class BuddyTools {
     var announce: (String) -> Void = { _ in }
     /// Self-update hooks. Only the instant voice commands (your own words) call these —
     /// they're deliberately NOT in `definitions`, so Blob's AI brains can't trigger an update.
+    var startTraining: (String?) -> String = { _ in "" }
+    var stopTraining: () -> Void = {}
+    var isTraining: () -> Bool = { false }
+    var runRoutine: (Routine, String?) async -> String = { _, _ in "" }
     var requestUpdate: (String) async -> String = { _ in "" }
     var undoUpdate: () async -> String = { "" }
     /// The app that was in front when Blob was summoned — keyboard tools type into it.
@@ -107,6 +111,11 @@ final class BuddyTools {
             tool("complete_task", "Mark a to-do/assignment as done.", ["title": str("Title (or close match) of the task")], ["title"]),
             tool("log_progress", "Log progress on an assignment from a plain sentence, e.g. 'worked 45 min on the history essay', 'finished the outline for my english essay', 'got 92/100 on the chem lab', 'history project is 60% done', 'break the science project into steps'. Pass the user's words.",
                  ["sentence": str("What the user said they did")], ["sentence"]),
+            tool("list_routines", "List the routines the user has taught Blob in training mode (things Blob can do on the Mac by repeating what it watched)."),
+            tool("run_routine", "Do a routine the user taught Blob in training mode. Use it when the request matches one of them.",
+                 ["name": str("Routine name"), "input": str("Optional text to type in place of the example (e.g. a search term)")], ["name"]),
+            tool("start_training", "Turn on training mode: Blob watches the user do something once so it can repeat it later.",
+                 ["name": str("What the routine is for, if the user said")]),
             tool("assignment_status", "How the user's long-term assignments are going (progress, on pace or behind, next step, time per day needed). Give a title for one assignment, or leave empty for all.",
                  ["title": str("Assignment (optional)")]),
             tool("check_in", "Check the user in: builds their timeline of what to work on from now until bedtime and returns it."),
@@ -151,6 +160,17 @@ final class BuddyTools {
         case "add_task": return addTask(input)
         case "complete_task": return completeTask(s("title") ?? "")
         case "log_progress": return logProgress(s("sentence") ?? "")
+        case "list_routines":
+            let r = RoutineLibrary.shared.routines
+            return ToolOutput(text: r.isEmpty ? "No routines learned yet. The user can teach one by saying \"training mode\"."
+                : r.map { "- \($0.name): " + $0.steps.prefix(6).map(\.summary).joined(separator: "; ") }.joined(separator: "\n"))
+        case "run_routine":
+            guard let r = RoutineLibrary.shared.match(s("name") ?? "")?.routine
+                    ?? RoutineLibrary.shared.routines.first(where: { $0.name.lowercased() == (s("name") ?? "").lowercased() }) else {
+                return .error("No routine called \"\(s("name") ?? "")\". Known: " + RoutineLibrary.shared.routines.map(\.name).joined(separator: ", "))
+            }
+            return ToolOutput(text: await runRoutine(r, s("input")))
+        case "start_training": return ToolOutput(text: startTraining(s("name")))
         case "assignment_status": return assignmentStatus(s("title"))
         case "check_in": return checkIn()
         case "set_timer": return setTimer(minutes: (input["minutes"] as? NSNumber)?.doubleValue ?? 0, label: s("label"))

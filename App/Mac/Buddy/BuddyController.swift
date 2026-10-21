@@ -51,6 +51,16 @@ final class BuddyController: ObservableObject {
     private var permissionsChecked = false
     private var bag = Set<AnyCancellable>()
 
+    // Training mode
+    @Published private(set) var training = false
+    @Published private(set) var trainingSteps = 0
+    private let recorder = TrainingRecorder()
+    private var trainingName: String?
+    /// Steps you just showed Blob, waiting for a name.
+    private var unnamedSteps: [RoutineStep]?
+    /// A running routine paused for you (e.g. to type a password); tapping fn continues it.
+    private var userContinue: CheckedContinuation<Void, Never>?
+
     static let panelSize = CGSize(width: 420, height: 520)
     static let blobArea = CGSize(width: 170, height: 170)
 
@@ -66,6 +76,10 @@ final class BuddyController: ObservableObject {
         tools.announce = { [weak self] s in self?.say(s) }
         tools.requestUpdate = { [weak self] r in await self?.requestSelfUpdate(r) ?? "" }
         tools.undoUpdate = { [weak self] in await self?.undoLastUpdate() ?? "" }
+        tools.startTraining = { [weak self] name in self?.startTraining(name: name) ?? "" }
+        tools.stopTraining = { [weak self] in self?.stopTraining() }
+        tools.isTraining = { [weak self] in self?.training ?? false }
+        tools.runRoutine = { [weak self] r, input in await self?.runRoutine(r, input: input) ?? "" }
         self.tools = tools
         brain = BuddyBrain(tools: tools)
 
@@ -197,6 +211,10 @@ final class BuddyController: ObservableObject {
     /// Keyboard shortcut or tap on the blob.
     func activate() {
         wakeUp()
+        // A routine is waiting for you (password etc.) → carry on.
+        if let c = userContinue { userContinue = nil; status = "Carrying on…"; c.resume(); return }
+        // Tapping fn (or Blob) ends training mode.
+        if training { stopTraining(); return }
         switch phase {
         case .listening:
             speechIn.stop(deliver: true)
@@ -267,6 +285,13 @@ final class BuddyController: ObservableObject {
 
     func submit(_ text: String) {
         guard let brain else { return }
+        // Naming what you just showed Blob.
+        if let steps = unnamedSteps {
+            unnamedSteps = nil
+            heard = text
+            finishTraining(name: text, steps: steps)
+            return
+        }
         wakeUp()
         speechIn.stop(deliver: false)
         speechOut.stop()
@@ -306,7 +331,7 @@ final class BuddyController: ObservableObject {
                     self.celebrate()
                     self.scheduleHide()
                 }
-            } else {
+            } else if !answer.isEmpty {
                 self.say(answer)
             }
         }
@@ -334,6 +359,8 @@ final class BuddyController: ObservableObject {
     }
 
     private func doneSpeaking() {
+        // Asked for a name → listen for it right away.
+        if unnamedSteps != nil, phase == .speaking { listen(); return }
         if phase == .speaking {
             phase = .awake
             if !isError { celebrate() }
@@ -347,7 +374,7 @@ final class BuddyController: ObservableObject {
             try? await Task.sleep(for: .seconds(12))
             // Stay open while an update is running so its live progress stays visible.
             if case .working = BlobUpdater.shared.state { return }
-            guard !Task.isCancelled, phase == .awake, typed.isEmpty, !updateMode else { return }
+            guard !Task.isCancelled, phase == .awake, typed.isEmpty, !updateMode, !training, unnamedSteps == nil else { return }
             dismiss()
         }
     }
@@ -362,6 +389,10 @@ final class BuddyController: ObservableObject {
     }
 
     func cancel() {
+        if training { _ = recorder.stop(); training = false }
+        unnamedSteps = nil
+        userContinue?.resume()
+        userContinue = nil
         work?.cancel()
         speechIn.stop(deliver: false)
         speechOut.stop()
@@ -391,6 +422,76 @@ final class BuddyController: ObservableObject {
         hideTask?.cancel()
         withAnimation(.spring(duration: 0.4)) { showBubble = true; if phase == .resting { phase = .awake } }
         panel?.makeKey()
+    }
+
+    // MARK: Training mode — watch once, do it on request
+
+    func startTraining(name: String?) -> String {
+        guard ScreenControl.requestPermission() else { return ScreenControl.permissionMessage }
+        if training { return "I'm already watching, sir. Tap \(BuddyShortcut.current.label) when you're done." }
+        trainingName = name.flatMap { $0.trimmingCharacters(in: .whitespaces).isEmpty ? nil : $0 }
+        recorder.onChange = { [weak self] n in self?.trainingSteps = n }
+        tools?.targetApp?.activate()
+        recorder.start()
+        training = true
+        trainingSteps = recorder.steps.count
+        return "Training mode is on, sir. Show me" + (trainingName.map { " how to \($0)" } ?? " what to do")
+            + ", and tap \(BuddyShortcut.current.label) when you're done."
+    }
+
+    func stopTraining() {
+        guard training else { return }
+        let steps = recorder.stop()
+        training = false
+        heard = ""
+        guard steps.contains(where: { $0.kind != .openApp }) else {
+            say("I didn't see you do anything, sir. Training mode is off.")
+            return
+        }
+        if let name = trainingName {
+            finishTraining(name: name, steps: steps)
+        } else {
+            unnamedSteps = steps
+            say("Got it, sir — \(steps.count) steps. What should I call it?")
+        }
+    }
+
+    private func finishTraining(name raw: String, steps: [RoutineStep]) {
+        var name = raw.trimmingCharacters(in: .whitespacesAndNewlines.union(.punctuationCharacters))
+        name = name.replacingOccurrences(of: #"^(?:call it|name it|it'?s called|let'?s call it|call that|save it as)\s+"#, with: "",
+                                         options: [.regularExpression, .caseInsensitive])
+        guard !name.isEmpty else { unnamedSteps = steps; say("What should I call it, sir?"); return }
+        let routine = Routine(name: name, steps: steps)
+        RoutineLibrary.shared.save(routine)
+        let preview = steps.prefix(4).map(\.summary).joined(separator: ", ")
+        let input = steps.contains { $0.isInput == true } ? " Add what to type after it, like “\(name) for something”." : ""
+        say("Learned “\(name)”, sir: \(steps.count) steps — \(preview)\(steps.count > 4 ? ", and so on" : ""). Just say “\(name)” and I'll do it.\(input)")
+    }
+
+    func runRoutine(_ routine: Routine, input: String?) async -> String {
+        guard ScreenControl.requestPermission() else { return ScreenControl.permissionMessage }
+        let risky = routine.riskyClicks
+        if !risky.isEmpty {
+            let what = risky.prefix(3).map { "“\($0)”" }.joined(separator: ", ")
+            guard await askPermission("run “\(routine.name)” — it clicks \(what)") else { return "Very well, I won't, sir." }
+        }
+        let player = RoutinePlayer()
+        player.onStatus = { [weak self] s in self?.status = s }
+        player.waitForUser = { [weak self] prompt in
+            guard let self, !Task.isCancelled else { return }
+            self.status = prompt
+            self.speechOut.speak(prompt.replacingOccurrences(of: "fn", with: BuddyShortcut.current.label) + ", sir.")
+            await withCheckedContinuation { self.userContinue = $0 }
+        }
+        let result = await player.run(routine, input: input)
+        var r = routine
+        r.lastRun = Date()
+        r.runs += 1
+        RoutineLibrary.shared.save(r)
+        if Task.isCancelled { return "Stopped, sir." }
+        if result.missed.isEmpty { return "Done, sir — “\(routine.name)”." }
+        return "Mostly done, sir, but I couldn't find " + result.missed.prefix(2).joined(separator: " or ")
+            + ". If the page changed, teach me again with “training mode for \(routine.name)”."
     }
 
     // MARK: Snapshot support (used by the -snapshot launch flag)

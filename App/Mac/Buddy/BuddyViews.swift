@@ -56,6 +56,21 @@ struct BuddyBubble: View {
                 }
             }
 
+            if buddy.training {
+                HStack(spacing: 8) {
+                    Circle().fill(BuddyColors.red).frame(width: 9, height: 9).shadow(color: BuddyColors.red, radius: 5)
+                    Text("Watching · \(buddy.trainingSteps) step\(buddy.trainingSteps == 1 ? "" : "s")")
+                        .font(.system(size: 12, weight: .bold, design: .rounded)).foregroundStyle(.white)
+                    Spacer()
+                    Button("Done") { buddy.stopTraining() }
+                        .buttonStyle(.plain).font(.system(size: 12, weight: .bold, design: .rounded))
+                        .padding(.horizontal, 10).padding(.vertical, 4)
+                        .background(Capsule().fill(BuddyColors.red)).foregroundStyle(.white)
+                }
+                .padding(8)
+                .background(RoundedRectangle(cornerRadius: 10).fill(BuddyColors.red.opacity(0.15)))
+            }
+
             if case .working(_, let since) = updater.state {
                 UpdateProgressView(since: since, steps: updater.progress)
             }

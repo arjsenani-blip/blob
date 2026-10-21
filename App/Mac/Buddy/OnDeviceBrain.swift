@@ -64,7 +64,7 @@ final class OnDeviceBrain {
             YouTubeTool(tools: t), SearchWebTool(tools: t), PlayMusicTool(tools: t),
             ListUITool(tools: t), ClickUITool(tools: t), MenuTool(tools: t), TypeTool(tools: t), KeysTool(tools: t),
             ScheduleTool(tools: t), AssignmentsTool(tools: t), AddEventTool(tools: t), AddTaskTool(tools: t),
-            CheckInTool(tools: t), LogProgressTool(tools: t), StatusTool(tools: t), TimerTool(tools: t), SearchFilesTool(tools: t), ReadFileTool(tools: t),
+            CheckInTool(tools: t), LogProgressTool(tools: t), StatusTool(tools: t), RunRoutineTool(tools: t), TimerTool(tools: t), SearchFilesTool(tools: t), ReadFileTool(tools: t),
             ReadScreenTool(tools: t), ClipboardTool(tools: t), SystemStatusTool(tools: t),
         ]
         return LanguageModelSession(tools: deviceTools, instructions: """
@@ -181,6 +181,19 @@ struct LogProgressTool: Tool {
         @Guide(description: "The user's sentence, e.g. 'worked 45 min on the history essay' or 'got 92/100 on the chem lab'") var sentence: String
     }
     func call(arguments: Arguments) async throws -> String { await run(tools, "log_progress", ["sentence": arguments.sentence]) }
+}
+
+struct RunRoutineTool: Tool {
+    let tools: BuddyTools
+    let name = "run_routine"
+    let description = "Do something the user taught Blob in training mode."
+    @Generable struct Arguments {
+        @Guide(description: "Routine name") var name: String
+        @Guide(description: "Text to type instead of the example, or empty") var input: String
+    }
+    func call(arguments: Arguments) async throws -> String {
+        await run(tools, "run_routine", ["name": arguments.name, "input": arguments.input])
+    }
 }
 
 struct StatusTool: Tool {

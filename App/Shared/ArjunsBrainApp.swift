@@ -320,6 +320,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     NSApplication.shared.terminate(nil)
                 }
             }
+            // `-trainingSelfTest <log>`: record typing into a new TextEdit document, replay it into another, check, clean up, quit.
+            if let log = UserDefaults.standard.string(forKey: "trainingSelfTest") {
+                Task { await TrainingSelfTest.run(log: log); NSApplication.shared.terminate(nil) }
+            }
             // `-speakTest "text"`: say one line with Blob's voice, report which engine spoke, then quit.
             if let line = UserDefaults.standard.string(forKey: "speakTest") {
                 let out = SpeechOutput()

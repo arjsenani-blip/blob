@@ -157,6 +157,7 @@ final class BuddyBrain {
         - You can read their computer: search_files, read_file, list_folder, read_clipboard, current_browser_tab, read_screen_text.
         - Homework, essays, projects, readings, worksheets and "study for…" are ASSIGNMENTS: use add_task with a due date and the class as course — never add_event. Only things that happen at a time or place (practice, games, appointments, meetings, the test itself) are events.
         - Their calendar, assignments and check-in timeline live in Blob's Brain (this app): get_schedule, list_assignments, add_event, add_task, complete_task, check_in.
+        - The user can teach you routines in training mode (you watch once, then repeat). If a request matches one (list_routines), use run_routine; to learn a new one, start_training.
         - Big assignments (projects, essays, studying for a test) are tracked long-term: add_task with long_term true splits them into dated steps. When the user says what they did ("worked an hour on…", "finished the draft", "got a 95 on…"), call log_progress with their words. For "how am I doing / am I behind", call assignment_status.
         - Use web_search for anything current (weather, news, scores).
         - run_shell and run_applescript are shown to them for approval. Never delete, send, buy or post anything unless they clearly asked for exactly that.
@@ -476,6 +477,29 @@ enum LocalCommands {
             guard let re = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]),
                   let m = re.firstMatch(in: text, range: NSRange(text.startIndex..., in: text)) else { return nil }
             return (0..<m.numberOfRanges).map { i in Range(m.range(at: i), in: text).map { String(text[$0]) } ?? "" }
+        }
+
+        // Training mode: watch once, repeat on request.
+        if tools.isTraining(), match(#"^(?:stop|end|exit|finish|turn off) (?:training|watching)(?: mode)?$|^(?:i'?m |all )?done$|^that'?s (?:it|all)$"#) != nil {
+            tools.stopTraining()
+            return ""
+        }
+        if let g = match(#"^(?:start |enter |turn on |go into )?training mode(?: (?:for|to) (.+))?$|^(?:watch|learn from) (?:me|what i do|this)(?: (?:do|while i) (.+))?$|^(?:let me |i'?ll |i want to )?(?:show|teach) you how to (.+)$|^learn how to (.+)$|^(?:train|teach) (?:yourself|blob)(?: (?:to|how to) (.+))?$"#) {
+            let name = [g[1], g[2], g[3], g[4], g[5]].first { !$0.isEmpty }
+            return tools.startTraining(name)
+        }
+        if match(#"^what (?:routines|things) (?:do you know|have you learned)|^what have you learned|^(?:list|show) (?:my )?routines$"#) != nil {
+            let names = RoutineLibrary.shared.routines.map { "“\($0.name)”" }
+            return names.isEmpty ? "Nothing yet, sir. Say “training mode” and show me something once." : "I know " + names.joined(separator: ", ") + ", sir."
+        }
+        if let g = match(#"^(?:forget|delete|remove) (?:the |my )?(?:routine )?(.+?)(?: routine)?$"#),
+           let r = RoutineLibrary.shared.match(g[1])?.routine {
+            RoutineLibrary.shared.delete(r.id)
+            return "Forgotten, sir — “\(r.name)”."
+        }
+        if let (routine, input) = RoutineLibrary.shared.match(raw) {
+            tools.onStatus("Doing “\(routine.name)”…")
+            return await tools.runRoutine(routine, input)
         }
 
         // YouTube & music
