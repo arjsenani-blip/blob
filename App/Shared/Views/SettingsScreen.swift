@@ -1,4 +1,5 @@
 import SwiftUI
+import EventKit
 import BrainCore
 
 struct SettingsScreen: View {
@@ -87,42 +88,7 @@ struct SettingsScreen: View {
                 Stepper("Late-night session: \(store.settings.lateSessionMinutes) min", value: setting(\.lateSessionMinutes), in: 15...180, step: 15)
             }
 
-            Section {
-                Toggle("Show my Apple Calendar events", isOn: Binding(
-                    get: { store.useAppleCalendar },
-                    set: { on in
-                        store.useAppleCalendar = on
-                        if on { Task { await systemCalendar.requestAccess() } }
-                    }))
-                Toggle("Assignments show up as tasks in Calendar", isOn: Binding(
-                    get: { store.appleTasksOn },
-                    set: { on in
-                        store.appleTasksOn = on
-                        if on { Task { await systemCalendar.requestRemindersAccess(); await store.syncApple() } }
-                    }))
-                if store.appleTasksOn {
-                    Toggle("Include the steps of long-term assignments", isOn: Binding(
-                        get: { store.appleStepsOn }, set: { store.appleStepsOn = $0; Task { await store.syncApple() } }))
-                    if !systemCalendar.remindersAuthorized {
-                        Text("Allow Reminders access in System Settings → Privacy & Security → Reminders.").font(.caption).foregroundStyle(.orange)
-                    }
-                }
-                Toggle("Add Blob's events to Apple Calendar", isOn: Binding(
-                    get: { store.appleEventsOn },
-                    set: { on in
-                        store.appleEventsOn = on
-                        if on { Task { await systemCalendar.requestAccess(); await store.syncApple() } }
-                    }))
-                if (store.useAppleCalendar || store.appleEventsOn) && !systemCalendar.authorized {
-                    Text("Allow calendar access in System Settings → Privacy & Security → Calendars.")
-                        .font(.caption).foregroundStyle(.orange)
-                }
-                if let err = store.appleSyncError { Text(err).font(.caption).foregroundStyle(.red) }
-            } header: {
-                Text("Apple Calendar")
-            } footer: {
-                Text("Assignments go into a “Blob” list with their due dates, so they appear as tasks in the Calendar app (and Reminders). Tick one off there and it's marked done in Blob. Blob's events go into a “Blob” calendar. Turn this on for both Mac and iPhone — they share the same iCloud items.")
-            }
+            AppleCalendarSection(systemCalendar: systemCalendar)
 
             Section {
                 GoogleCalendarRows(school: school, personal: personal, clientMissing: clientID.isEmpty)
@@ -287,5 +253,114 @@ private struct GoogleCalendarRows: View {
             if let e = acct.lastError { Text(e).font(.caption).foregroundStyle(.red) }
         }
         if let err = store.googleCalendarError { Text(err).font(.caption).foregroundStyle(.red) }
+    }
+}
+
+/// Apple Calendar & Reminders — and through them any calendar account on this device (iCloud, Google, Outlook/Exchange, Yahoo…).
+private struct AppleCalendarSection: View {
+    @EnvironmentObject var store: BrainStore
+    @ObservedObject var systemCalendar: SystemCalendarBridge
+
+    private func calendars(_ type: EKEntityType) -> [EKCalendar] {
+        _ = systemCalendar.changeToken
+        return AppleSync.writableCalendars(systemCalendar.store, type)
+    }
+
+    private func sync() { Task { await store.syncApple() } }
+
+    var body: some View {
+        Section {
+            Toggle("Show my calendar events in Blob", isOn: Binding(
+                get: { store.useAppleCalendar },
+                set: { on in store.useAppleCalendar = on; if on { Task { await systemCalendar.requestAccess() } } }))
+
+            // Homework ↔ Reminders (+ due dates on your calendar)
+            Toggle("Homework in Reminders & my calendar", isOn: Binding(
+                get: { store.appleTasksOn },
+                set: { on in
+                    store.appleTasksOn = on
+                    guard on else { return }
+                    Task {
+                        await systemCalendar.requestRemindersAccess()
+                        await systemCalendar.requestAccess()
+                        // Due dates go on your main calendar unless you pick another below.
+                        if store.appleDueCalendar.isEmpty, let main = systemCalendar.store.defaultCalendarForNewEvents, main.allowsContentModifications {
+                            store.appleDueCalendar = main.calendarIdentifier
+                        }
+                        await store.syncApple()
+                    }
+                }))
+            if store.appleTasksOn {
+                if systemCalendar.remindersAuthorized {
+                    Picker("Homework list", selection: Binding(get: { store.appleReminderList }, set: { store.appleReminderList = $0; sync() })) {
+                        Text("Homework (made by Blob)").tag("")
+                        ForEach(calendars(.reminder).filter { $0.title != AppleSync.homeworkListName }, id: \.calendarIdentifier) { c in
+                            Text("\(c.title) · \(c.source.title)").tag(c.calendarIdentifier)
+                        }
+                    }
+                    Picker("Other to-dos (not school)", selection: Binding(get: { store.appleOtherList }, set: { store.appleOtherList = $0; sync() })) {
+                        Text("Keep in Blob only").tag("")
+                        ForEach(calendars(.reminder).filter { $0.title != AppleSync.homeworkListName && $0.calendarIdentifier != store.appleReminderList }, id: \.calendarIdentifier) { c in
+                            Text("\(c.title) · \(c.source.title)").tag(c.calendarIdentifier)
+                        }
+                    }
+                    Toggle("Reminders I add to the Homework list become assignments", isOn: Binding(
+                        get: { store.appleImportReminders }, set: { store.appleImportReminders = $0; sync() }))
+                    Toggle("Include the steps of long-term assignments", isOn: Binding(
+                        get: { store.appleStepsOn }, set: { store.appleStepsOn = $0; sync() }))
+                } else {
+                    Text("Allow Reminders access in System Settings → Privacy & Security → Reminders.").font(.caption).foregroundStyle(.orange)
+                }
+            }
+
+            // Due dates → any calendar
+            if systemCalendar.authorized {
+                Picker("Show due dates on calendar", selection: Binding(get: { store.appleDueCalendar }, set: { store.appleDueCalendar = $0; sync() })) {
+                    Text("Off").tag("")
+                    ForEach(calendars(.event), id: \.calendarIdentifier) { c in
+                        Text("\(c.title) · \(c.source.title)").tag(c.calendarIdentifier)
+                    }
+                }
+            } else {
+                Button("Allow calendar access to put due dates on your calendar") { Task { await systemCalendar.requestAccess() } }
+            }
+
+            // Blob's events → a calendar
+            Toggle("Add Blob's events to my calendar", isOn: Binding(
+                get: { store.appleEventsOn },
+                set: { on in store.appleEventsOn = on; if on { Task { await systemCalendar.requestAccess(); await store.syncApple() } } }))
+            if store.appleEventsOn && systemCalendar.authorized {
+                Picker("Put them in", selection: Binding(get: { store.appleEventCalendar }, set: { store.appleEventCalendar = $0; sync() })) {
+                    Text("Blob (its own calendar)").tag("")
+                    ForEach(calendars(.event).filter { $0.title != AppleSync.calendarName }, id: \.calendarIdentifier) { c in
+                        Text("\(c.title) · \(c.source.title)").tag(c.calendarIdentifier)
+                    }
+                }
+            }
+            if (store.useAppleCalendar || store.appleEventsOn) && !systemCalendar.authorized {
+                Text("Allow calendar access in System Settings → Privacy & Security → Calendars.").font(.caption).foregroundStyle(.orange)
+            }
+            if let err = store.appleSyncError { Text(err).font(.caption).foregroundStyle(.red) }
+        } header: {
+            Text("Calendars & Reminders")
+        } footer: {
+            Text("Blob uses context to spot homework — Classroom work, anything with a class, and school words like essay, worksheet, lab, chapter, study for, quiz — and puts it in a “Homework” list in Reminders, with due dates on your calendar. Everyday to-dos (groceries, calls) stay out unless you pick a list for them. Works with every calendar and reminders account on this \(deviceName): iCloud, Google, Outlook/Exchange, Yahoo and more — add accounts in \(accountsPlace). Tick something off in Reminders or Calendar and it's done in Blob. Drag a due date to another day in Calendar to change it. Turn on the same options on your Mac and iPhone — they update the same items, not copies.")
+        }
+        .onAppear { if store.appleTasksOn || store.appleEventsOn || !store.appleDueCalendar.isEmpty { sync() } }
+    }
+
+    private var deviceName: String {
+        #if os(macOS)
+        "Mac"
+        #else
+        "iPhone"
+        #endif
+    }
+    private var accountsPlace: String {
+        #if os(macOS)
+        "System Settings → Internet Accounts"
+        #else
+        "Settings → Apps → Calendar → Calendar Accounts"
+        #endif
     }
 }

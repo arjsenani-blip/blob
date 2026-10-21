@@ -279,3 +279,19 @@ public enum Workload {
 extension String {
     var nilIfEmpty: String? { isEmpty ? nil : self }
 }
+
+// MARK: - Is it homework?
+
+extension BrainTask {
+    /// School words only — not general ones like "finish" or "submit", so "finish laundry" isn't homework.
+    static let schoolPattern = #"\b(home ?work|hw|assignment|essay|worksheet|problem ?set|pset|practice (problems|questions|set|test)|lab|write ?up|project|reading|read (ch|chapter|pages|pp)|chapters?|paper|report|study ?guide|study for|review for|notes|outline|rough draft|final draft|annotations?|exercises|packet|journal entry|reflection|flashcards|vocab|discussion post|frq|dbq|leq|saq|quiz|test|exam|midterm|final|presentation|slides|textbook|unit \d+|module \d+|lesson \d+|ap )\b"#
+
+    /// Uses context: where it came from, its class, grades/steps, and what it's called.
+    public var looksLikeSchoolwork: Bool {
+        if source == .classroom || pointsEarned != nil || maxPoints != nil || !milestones.isEmpty { return true }
+        if let c = course?.lowercased(), !c.isEmpty, !["personal", "home", "errands", "chores", "work", "family", "life"].contains(c) { return true }
+        let t = title.lowercased()
+        if t.range(of: Self.schoolPattern, options: [.regularExpression, .caseInsensitive]) != nil { return true }
+        return NaturalLanguageParser.subjects.contains { t.range(of: $0.pattern, options: .regularExpression) != nil }
+    }
+}

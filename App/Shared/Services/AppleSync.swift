@@ -10,6 +10,8 @@ import BrainCore
 @MainActor
 final class AppleSync {
     static let calendarName = "Blob"
+    /// The Reminders list homework goes in (made for you if you don't pick another).
+    static let homeworkListName = "Homework"
     private let ek: EKEventStore
     private var running = false
     private var dirty = false
@@ -22,6 +24,26 @@ final class AppleSync {
         var tasks: Bool
         var steps: Bool
         var events: Bool
+        /// Reminders list for homework (calendarIdentifier); nil = a list called "Homework".
+        var reminderList: String? = nil
+        /// Where your other (non-school) to-dos go; nil = they stay only in Blob.
+        var otherTasksList: String? = nil
+        /// Bring reminders you add to that list into Blob as assignments.
+        var importReminders = true
+        /// Calendar for Blob's events; nil = a "Blob" calendar.
+        var eventCalendar: String? = nil
+        /// Calendar to show assignment due dates (and steps) on as events; nil = off.
+        var dueCalendar: String? = nil
+    }
+
+    /// A reminder you added in the Reminders app, to become a Blob assignment.
+    struct ImportedReminder {
+        var id: UUID
+        var title: String
+        var due: Date?
+        var notes: String?
+        var isCompleted: Bool
+        var highPriority: Bool
     }
 
     struct Result {
@@ -30,6 +52,7 @@ final class AppleSync {
         var stepsDoneInApple: [(task: UUID, step: UUID)] = []
         var dueChanged: [(task: UUID, due: Date)] = []
         var eventsChanged: [BrainEvent] = []
+        var imported: [ImportedReminder] = []
     }
 
     var isRecentOwnWrite: Bool { Date().timeIntervalSince(lastOwnWrite) < 3 }
@@ -40,10 +63,32 @@ final class AppleSync {
         defer { running = false }
         var result = Result()
         if options.tasks, EKEventStore.authorizationStatus(for: .reminder) == .fullAccess {
-            try await syncReminders(tasks, includeSteps: options.steps, into: &result)
+            let list = try calendar(for: .reminder, id: options.reminderList)
+            let otherList = options.otherTasksList.flatMap { ek.calendar(withIdentifier: $0) }.flatMap { $0.allowsContentModifications && $0 != list ? $0 : nil }
+            if UserDefaults.standard.string(forKey: "lastReminderList") != list.calendarIdentifier {
+                try await moveOffOtherCalendars(type: .reminder, keeping: list, setting: "lastReminderList", except: otherList)
+            }
+            // Homework (by context) → the Homework list. Something you put in that list yourself stays there.
+            let inHomeworkList = Set(await fetchReminders(in: [list]).compactMap { $0.url?.absoluteString })
+            let isHomework: (BrainTask) -> Bool = { $0.looksLikeSchoolwork || inHomeworkList.contains("blob://task/\($0.id.uuidString)") }
+            try await syncReminders(tasks.filter(isHomework), list: list, includeSteps: options.steps, importNew: options.importReminders, into: &result)
+            if let otherList {
+                try await syncReminders(tasks.filter { !isHomework($0) }, list: otherList, includeSteps: false, importNew: false, into: &result)
+            }
         }
-        if options.events, EKEventStore.authorizationStatus(for: .event) == .fullAccess {
-            try syncEvents(events, into: &result)
+        if EKEventStore.authorizationStatus(for: .event) == .fullAccess {
+            if options.events {
+                let cal = try calendar(for: .event, id: options.eventCalendar)
+                try await moveOffOtherCalendars(type: .event, keeping: cal, setting: "lastEventCalendar", prefix: "blob://event/")
+                try syncEvents(events, calendar: cal, into: &result)
+            }
+            if let id = options.dueCalendar, let cal = ek.calendar(withIdentifier: id), cal.allowsContentModifications {
+                try await moveOffOtherCalendars(type: .event, keeping: cal, setting: "lastDueCalendar", prefix: "blob://due/")
+                syncDueDates(tasks, calendar: cal, includeSteps: options.steps, into: &result)
+            } else if options.dueCalendar == nil, UserDefaults.standard.string(forKey: "lastDueCalendar") != nil {
+                // Turned off → take the due dates back off the calendar.
+                try await moveOffOtherCalendars(type: .event, keeping: nil, setting: "lastDueCalendar", prefix: "blob://due/")
+            }
         }
         if dirty {
             lastOwnWrite = Date()
@@ -55,10 +100,53 @@ final class AppleSync {
 
     // MARK: Lists / calendars
 
+    /// Every list or calendar Blob can write into (iCloud, Google, Exchange/Outlook, Yahoo… whatever is added to this device).
+    static func writableCalendars(_ ek: EKEventStore, _ type: EKEntityType) -> [EKCalendar] {
+        ek.calendars(for: type).filter(\.allowsContentModifications)
+            .sorted { ($0.source.title, $0.title) < ($1.source.title, $1.title) }
+    }
+
+    /// The list/calendar you picked, or Blob's own one.
+    private func calendar(for type: EKEntityType, id: String?) throws -> EKCalendar {
+        if let id, let c = ek.calendar(withIdentifier: id), c.allowsContentModifications { return c }
+        return try blobCalendar(for: type)
+    }
+
+    /// After you switch lists/calendars, Blob's items in the old one are removed (they're recreated in the new one).
+    private func moveOffOtherCalendars(type: EKEntityType, keeping: EKCalendar?, setting: String, prefix: String = "blob://",
+                                       except: EKCalendar? = nil) async throws {
+        let last = UserDefaults.standard.string(forKey: setting)
+        guard last != keeping?.calendarIdentifier else { return }
+        defer { UserDefaults.standard.set(keeping?.calendarIdentifier, forKey: setting) }
+        guard last != nil else { return }      // first run: nothing to clean up
+        let others = ek.calendars(for: type).filter {
+            $0.calendarIdentifier != keeping?.calendarIdentifier && $0.calendarIdentifier != except?.calendarIdentifier && $0.allowsContentModifications
+        }
+        guard !others.isEmpty else { return }
+        if type == .reminder {
+            let all = await fetchReminders(in: others)
+            for r in all where r.url?.absoluteString.hasPrefix(prefix) == true {
+                try? ek.remove(r, commit: false); dirty = true
+            }
+            // The old "Blob" list from before Homework existed — remove it once it's empty.
+            for c in others where c.title == Self.calendarName {
+                let left = all.filter { $0.calendar == c && !($0.url?.absoluteString.hasPrefix(prefix) ?? false) }
+                if left.isEmpty { try? ek.removeCalendar(c, commit: false); dirty = true }
+            }
+        } else {
+            let from = Date().addingTimeInterval(-90 * 86_400), to = Date().addingTimeInterval(400 * 86_400)
+            for e in ek.events(matching: ek.predicateForEvents(withStart: from, end: to, calendars: others))
+            where e.url?.absoluteString.hasPrefix(prefix) == true {
+                try? ek.remove(e, span: .futureEvents, commit: false); dirty = true
+            }
+        }
+    }
+
     private func blobCalendar(for type: EKEntityType) throws -> EKCalendar {
-        if let c = ek.calendars(for: type).first(where: { $0.title == Self.calendarName && $0.allowsContentModifications }) { return c }
+        let name = type == .reminder ? Self.homeworkListName : Self.calendarName
+        if let c = ek.calendars(for: type).first(where: { $0.title == name && $0.allowsContentModifications }) { return c }
         let cal = EKCalendar(for: type, eventStore: ek)
-        cal.title = Self.calendarName
+        cal.title = name
         cal.cgColor = CGColor(red: 0.0, green: 0.78, blue: 0.95, alpha: 1)   // Blob cyan
         // iCloud first so it reaches your other devices; otherwise wherever new items normally go.
         let preferred = type == .reminder ? ek.defaultCalendarForNewReminders()?.source : ek.defaultCalendarForNewEvents?.source
@@ -71,24 +159,39 @@ final class AppleSync {
 
     // MARK: Assignments → Reminders (shown in Calendar)
 
-    private func fetchReminders(in cal: EKCalendar) async -> [EKReminder] {
-        let predicate = ek.predicateForReminders(in: [cal])
+    private func fetchReminders(in cals: [EKCalendar]) async -> [EKReminder] {
+        let predicate = ek.predicateForReminders(in: cals)
         return await withCheckedContinuation { cont in
             ek.fetchReminders(matching: predicate) { cont.resume(returning: $0 ?? []) }
         }
     }
 
-    private func syncReminders(_ tasks: [BrainTask], includeSteps: Bool, into result: inout Result) async throws {
-        let list = try blobCalendar(for: .reminder)
+    private func syncReminders(_ tasks: [BrainTask], list: EKCalendar, includeSteps: Bool, importNew: Bool,
+                               into result: inout Result) async throws {
         var existing: [String: EKReminder] = [:]
-        for r in await fetchReminders(in: list) {
-            guard let key = r.url?.absoluteString, key.hasPrefix("blob://") else { continue }
+        var wanted = Set<String>()
+        let known = Set(tasks.map(\.id))
+        for r in await fetchReminders(in: [list]) {
+            guard let key = r.url?.absoluteString, key.hasPrefix("blob://") else {
+                // Added by you in Reminders → becomes an assignment (same id on every device, so no doubles).
+                guard importNew, !r.isCompleted, let title = r.title?.trimmingCharacters(in: .whitespaces), !title.isEmpty else { continue }
+                let id = UUID.stable(from: "reminder:\(r.calendarItemExternalIdentifier ?? r.calendarItemIdentifier)")
+                let key = "blob://task/\(id.uuidString)"
+                r.url = URL(string: key)
+                try? ek.save(r, commit: false); dirty = true
+                existing[key] = r
+                wanted.insert(key)
+                if !known.contains(id) {
+                    result.imported.append(ImportedReminder(id: id, title: title, due: r.dueDateComponents.flatMap { Calendar.current.date(from: $0) },
+                                                            notes: r.notes, isCompleted: false, highPriority: (1...4).contains(r.priority)))
+                }
+                continue
+            }
             if existing[key] != nil { try ek.remove(r, commit: false); dirty = true; continue }   // duplicate from another device
             existing[key] = r
         }
 
         let recent = Date().addingTimeInterval(-14 * 86_400)
-        var wanted = Set<String>()
         for t in tasks {
             let key = "blob://task/\(t.id.uuidString)"
             let keep = !t.deleted && (!t.isCompleted || (t.completedAt ?? .distantPast) > recent)
@@ -157,8 +260,71 @@ final class AppleSync {
 
     // MARK: Blob events → Apple Calendar
 
-    private func syncEvents(_ events: [BrainEvent], into result: inout Result) throws {
-        let cal = try blobCalendar(for: .event)
+    // MARK: Assignment due dates → any calendar you pick
+
+    private func syncDueDates(_ tasks: [BrainTask], calendar cal: EKCalendar, includeSteps: Bool, into result: inout Result) {
+        let from = Date().addingTimeInterval(-30 * 86_400), to = Date().addingTimeInterval(400 * 86_400)
+        var existing: [String: EKEvent] = [:]
+        for e in ek.events(matching: ek.predicateForEvents(withStart: from, end: to, calendars: [cal])) {
+            guard let key = e.url?.absoluteString, key.hasPrefix("blob://due/") else { continue }
+            if existing[key] != nil { try? ek.remove(e, span: .thisEvent, commit: false); dirty = true; continue }
+            existing[key] = e
+        }
+        var wanted = Set<String>()
+        for t in tasks where !t.deleted && !t.isCompleted {
+            guard let due = t.due, due > from else { continue }
+            let key = "blob://due/\(t.id.uuidString)"
+            wanted.insert(key)
+            // Dragged to another day in Calendar → that's the new due date.
+            if let e = existing[key], (e.lastModifiedDate ?? .distantPast) > t.updatedAt.addingTimeInterval(1) {
+                let moved = Self.isEndOfDay(due) ? !Calendar.current.isDate(e.startDate, inSameDayAs: due) : abs(e.endDate.timeIntervalSince(due)) > 60
+                if moved {
+                    let start: Date = e.startDate, end: Date = e.endDate
+                    let newDue: Date = e.isAllDay ? (Calendar.current.date(bySettingHour: 23, minute: 59, second: 0, of: start) ?? start) : end
+                    result.dueChanged.append((task: t.id, due: newDue))
+                    continue
+                }
+            }
+            var lines = [t.course, t.isLongTerm ? "\(Int(t.progress * 100))% done · \(t.pace().label)" : nil, t.link].compactMap { $0 }
+            lines.append(key)
+            writeDue(existing[key], calendar: cal, key: key, title: "📚 Due: \(t.title)", due: due, notes: lines.joined(separator: "\n"))
+            guard includeSteps else { continue }
+            for m in t.milestones where !m.isDone {
+                guard let d = m.due, d > from else { continue }
+                let mkey = "blob://due/\(t.id.uuidString)/step/\(m.id.uuidString)"
+                wanted.insert(mkey)
+                writeDue(existing[mkey], calendar: cal, key: mkey, title: "↳ \(m.title) — \(t.title)", due: d,
+                         notes: "Step of \(t.title)" + (t.course.map { " · \($0)" } ?? "") + "\n\(mkey)", allDay: true)
+            }
+        }
+        for (key, e) in existing where !wanted.contains(key) { try? ek.remove(e, span: .thisEvent, commit: false); dirty = true }
+    }
+
+    static func isEndOfDay(_ d: Date) -> Bool {
+        let c = Calendar.current.dateComponents([.hour, .minute], from: d)
+        return (c.hour == 23 && (c.minute ?? 0) >= 59) || (c.hour == 0 && c.minute == 0)
+    }
+
+    /// Due at a set time → a 30-minute marker ending then; due "that day" → an all-day event.
+    private func writeDue(_ found: EKEvent?, calendar: EKCalendar, key: String, title: String, due: Date, notes: String, allDay: Bool? = nil) {
+        let isAllDay = allDay ?? Self.isEndOfDay(due)
+        let start = isAllDay ? Calendar.current.startOfDay(for: due) : due.addingTimeInterval(-30 * 60)
+        let end = isAllDay ? Calendar.current.date(byAdding: .day, value: 1, to: start)! : due
+        if let e = found, e.title == title, e.isAllDay == isAllDay, e.notes == notes,
+           isAllDay ? Calendar.current.isDate(e.startDate, inSameDayAs: start) : (e.startDate == start && e.endDate == end) { return }
+        let e = found ?? EKEvent(eventStore: ek)
+        if found == nil { e.calendar = calendar }
+        e.title = title
+        e.url = URL(string: key)
+        e.notes = notes
+        e.isAllDay = isAllDay
+        e.startDate = start
+        e.endDate = end
+        e.availability = .free          // a due date isn't time you're busy
+        try? ek.save(e, span: .thisEvent, commit: false); dirty = true
+    }
+
+    private func syncEvents(_ events: [BrainEvent], calendar cal: EKCalendar, into result: inout Result) throws {
         let from = Date().addingTimeInterval(-60 * 86_400), to = Date().addingTimeInterval(400 * 86_400)
         var existing: [String: EKEvent] = [:]
         for e in ek.events(matching: ek.predicateForEvents(withStart: from, end: to, calendars: [cal])) {

@@ -25,6 +25,16 @@ final class BrainStore: ObservableObject {
     @AppStorage("appleStepsOn") var appleStepsOn = true
     /// Blob's events go into a "Blob" calendar in Apple Calendar.
     @AppStorage("appleEventsOn") var appleEventsOn = false
+    /// Which Reminders list homework goes in ("" = a list called Homework).
+    @AppStorage("appleReminderList") var appleReminderList = ""
+    /// Where non-school to-dos go in Reminders ("" = nowhere, they stay in Blob).
+    @AppStorage("appleOtherList") var appleOtherList = ""
+    /// Reminders you add to that list come into Blob as assignments.
+    @AppStorage("appleImportReminders") var appleImportReminders = true
+    /// Which calendar Blob's events go in ("" = a calendar called Blob).
+    @AppStorage("appleEventCalendar") var appleEventCalendar = ""
+    /// Calendar that shows assignment due dates as events ("" = off). Any calendar on this device: iCloud, Google, Outlook…
+    @AppStorage("appleDueCalendar") var appleDueCalendar = ""
     @Published private(set) var appleSyncError: String?
     @AppStorage("googleCalendarOn") var googleCalendarOn = false
     @AppStorage("googleEventsPushOn") var googleEventsPushOn = false
@@ -391,7 +401,7 @@ final class BrainStore: ObservableObject {
     // MARK: Apple Calendar & Reminders
 
     func scheduleAppleSync(after seconds: Double = 1) {
-        guard appleTasksOn || appleEventsOn else { return }
+        guard appleTasksOn || appleEventsOn || !appleDueCalendar.isEmpty else { return }
         appleTask?.cancel()
         appleTask = Task {
             try? await Task.sleep(for: .seconds(seconds))
@@ -401,10 +411,26 @@ final class BrainStore: ObservableObject {
     }
 
     func syncApple() async {
-        guard appleTasksOn || appleEventsOn, !isTestData else { return }
+        // (Also runs once after due dates are turned off, to take them back off the calendar.)
+        guard appleTasksOn || appleEventsOn || !appleDueCalendar.isEmpty || UserDefaults.standard.string(forKey: "lastDueCalendar") != nil,
+              !isTestData else { return }
         do {
             let r = try await appleSync.sync(tasks: doc.tasks, events: doc.events,
-                                             options: .init(tasks: appleTasksOn, steps: appleStepsOn, events: appleEventsOn))
+                                             options: .init(tasks: appleTasksOn, steps: appleStepsOn, events: appleEventsOn,
+                                                            reminderList: appleReminderList.isEmpty ? nil : appleReminderList,
+                                                            otherTasksList: appleOtherList.isEmpty ? nil : appleOtherList,
+                                                            importReminders: appleImportReminders,
+                                                            eventCalendar: appleEventCalendar.isEmpty ? nil : appleEventCalendar,
+                                                            dueCalendar: appleDueCalendar.isEmpty ? nil : appleDueCalendar))
+            // Reminders you added in the Reminders app → assignments (class and long-term setup work like quick add).
+            for item in r.imported where task(item.id) == nil {
+                let parsed = parse(item.title)
+                upsert(BrainTask(id: item.id, title: item.title, course: parsed.course, notes: item.notes,
+                                 due: item.due ?? (parsed.kind == .task ? parsed.start : nil),
+                                 estimatedMinutes: parsed.durationMinutes ?? 30, priority: item.highPriority ? .high : .normal))
+                setUpLongTermIfNeeded(item.id, explicit: false)
+            }
+            if !r.imported.isEmpty { show("\(r.imported.count) new from Reminders") }
             appleSyncError = nil
             // Bring back what you changed in Calendar / Reminders.
             for id in r.completedInApple { if var t = task(id), !t.isCompleted { markDone(&t); upsert(t) } }

@@ -44,7 +44,8 @@ final class SystemCalendarBridge: ObservableObject {
         let calendars = store.calendars(for: .event).filter { $0.title != AppleSync.calendarName }
         guard !calendars.isEmpty else { return [] }
         let predicate = store.predicateForEvents(withStart: range.start, end: range.end, calendars: calendars)
-        return store.events(matching: predicate).map { e in
+        // Blob's own items (events, due dates) can live in any calendar now — they're already shown from Blob's data.
+        return store.events(matching: predicate).filter { !($0.url?.absoluteString.hasPrefix("blob://") ?? false) }.map { e in
             EventOccurrence(id: "ek:\(e.calendarItemIdentifier)@\(Int(e.startDate.timeIntervalSince1970))", eventID: nil,
                             title: e.title ?? "Busy", start: e.startDate, end: e.endDate, isAllDay: e.isAllDay,
                             location: e.location, externalCalendar: e.calendar.title,

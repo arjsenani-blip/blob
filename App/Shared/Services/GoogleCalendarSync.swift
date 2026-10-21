@@ -31,6 +31,7 @@ struct GoogleCalendarSync {
         let id: String
         let status: String?
         let summary: String?
+        let description: String?
         let location: String?
         let start: GTime?
         let end: GTime?
@@ -53,7 +54,7 @@ struct GoogleCalendarSync {
                 let page: EventList = try await get(url)
                 for e in page.items ?? [] where e.status != "cancelled" {
                     // Skip Blob's own events (they're already in Blob).
-                    if e.id.hasPrefix("blob") || e.extendedProperties?.private?["blob"] != nil { continue }
+                    if e.id.hasPrefix("blob") || e.extendedProperties?.private?["blob"] != nil || (e.description ?? "").contains("blob://") { continue }
                     guard let (s, en, allDay) = Self.times(e.start, e.end) else { continue }
                     out.append(CachedEvent(id: "gcal:\(e.id)", title: e.summary ?? "Busy", start: s, end: en, isAllDay: allDay,
                                            location: e.location, calendar: c.summary ?? "Google Calendar", colorHex: c.backgroundColor))

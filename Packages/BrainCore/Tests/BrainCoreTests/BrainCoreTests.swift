@@ -418,3 +418,18 @@ final class ProgressLogTests: XCTestCase {
         XCTAssertEqual(TaskMatcher.step("research", in: e)?.title, "Research & sources")
     }
 }
+
+final class HomeworkContextTests: XCTestCase {
+    func testWhatCountsAsHomework() {
+        for title in ["Chem lab report", "Read chapter 5", "calc problem set 4.3", "Study for bio test", "Unit 3 DBQ essay",
+                      "spanish vocab", "History project", "Annotate Gatsby ch 3 annotations"] {
+            XCTAssertTrue(BrainTask(title: title).looksLikeSchoolwork, title)
+        }
+        XCTAssertTrue(BrainTask(title: "Thing", source: .classroom).looksLikeSchoolwork)
+        XCTAssertTrue(BrainTask(title: "Ms. Lee's packet", course: "AP World History").looksLikeSchoolwork)
+        for title in ["Buy poster board", "Call grandma", "Finish laundry", "Submit the job application form", "Pick up dry cleaning"] {
+            XCTAssertFalse(BrainTask(title: title).looksLikeSchoolwork, title)
+        }
+        XCTAssertFalse(BrainTask(title: "Groceries", course: "errands").looksLikeSchoolwork)
+    }
+}
