@@ -160,7 +160,8 @@ public enum MilestonePlanner {
         let steps: [(String, Double)]
         if has("essay", "paper", "report", "dbq", "writing", "research", "thesis") {
             steps = [("Research & sources", 0.2), ("Outline", 0.15), ("Rough draft", 0.35), ("Revise & edit", 0.2), ("Final read-through & submit", 0.1)]
-        } else if has("test", "exam", "final", "midterm", "quiz", "ap ", "sat", "act") {
+        } else if has("test", "exam", "midterm", "quiz", "ap exam", "final exam", "finals")
+                    || t.range(of: #"\b(sat|act|psat)\s+(test|prep|practice|exam)\b"#, options: .regularExpression) != nil {
             steps = [("Make a study guide", 0.25), ("Review weak topics", 0.3), ("Practice test", 0.3), ("Final review", 0.15)]
         } else if has("presentation", "slides", "speech") {
             steps = [("Research", 0.25), ("Build the slides", 0.4), ("Practice out loud", 0.25), ("Final polish", 0.1)]

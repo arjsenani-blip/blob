@@ -190,13 +190,13 @@ final class TrainingRecorder {
                 append(RoutineStep(kind: .openURL, appBundleID: id, appName: front.localizedName, url: u))
             }
         }
-        let handler: (NSEvent) -> Void = { e in MainActor.assumeIsolated { self.handle(e) } }
+        let handler: (NSEvent) -> Void = { e in Task { @MainActor in self.handle(e) } }
         if let m = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown, .keyDown, .scrollWheel], handler: handler) {
             monitors.append(m)
         }
         NSWorkspace.shared.notificationCenter.addObserver(self, selector: #selector(appActivated(_:)),
                                                           name: NSWorkspace.didActivateApplicationNotification, object: nil)
-        urlTimer = Timer.scheduledTimer(withTimeInterval: 1.2, repeats: true) { _ in MainActor.assumeIsolated { self.checkURL() } }
+        urlTimer = Timer.scheduledTimer(withTimeInterval: 1.2, repeats: true) { _ in Task { @MainActor in self.checkURL() } }
     }
 
     /// Stops watching and returns the cleaned-up steps.

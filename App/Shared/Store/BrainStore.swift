@@ -44,7 +44,10 @@ final class BrainStore: ObservableObject {
     @Published var isSyncingGoogle = false
     var lastGoogleRead: Date?
     private var googleTask: Task<Void, Never>?
-    lazy var appleSync = AppleSync(store: systemCalendar.store)
+    let appleSync = AppleSync()
+    private var appleSyncRunning = false
+    /// When the last Apple sync wrote — its own Calendar/Reminders changes shouldn't trigger another sync.
+    var lastAppleWrite = Date.distantPast
     private var appleTask: Task<Void, Never>?
 
     let school = GoogleAccount(role: .school)
@@ -78,9 +81,10 @@ final class BrainStore: ObservableObject {
     // MARK: Lifecycle
 
     func onLaunch() async {
+        repairAccidentalSteps()
         if remindersOn { _ = await Reminders.requestAuthorization() }
         systemCalendar.onExternalChange = { [weak self] in
-            guard let self, !self.appleSync.isRecentOwnWrite else { return }
+            guard let self, Date().timeIntervalSince(self.lastAppleWrite) > 3 else { return }
             self.scheduleAppleSync(after: 1.5)
         }
         await syncEverything()
@@ -411,36 +415,50 @@ final class BrainStore: ObservableObject {
     }
 
     func syncApple() async {
+        SyncLog.write("apple: start tasks=\(appleTasksOn) due=\(!appleDueCalendar.isEmpty) events=\(appleEventsOn)")
         // (Also runs once after due dates are turned off, to take them back off the calendar.)
-        guard appleTasksOn || appleEventsOn || !appleDueCalendar.isEmpty || UserDefaults.standard.string(forKey: "lastDueCalendar") != nil,
-              !isTestData else { return }
+        let saved = UserDefaults.standard.dictionary(forKey: "appleSyncState") as? [String: String] ?? [:]
+        guard appleTasksOn || appleEventsOn || !appleDueCalendar.isEmpty || saved["lastDueCalendar"] != nil, !isTestData,
+              !appleSyncRunning else { return }
+        appleSyncRunning = true
+        defer { appleSyncRunning = false }
         do {
-            let r = try await appleSync.sync(tasks: doc.tasks, events: doc.events,
-                                             options: .init(tasks: appleTasksOn, steps: appleStepsOn, events: appleEventsOn,
-                                                            reminderList: appleReminderList.isEmpty ? nil : appleReminderList,
-                                                            otherTasksList: appleOtherList.isEmpty ? nil : appleOtherList,
-                                                            importReminders: appleImportReminders,
-                                                            eventCalendar: appleEventCalendar.isEmpty ? nil : appleEventCalendar,
-                                                            dueCalendar: appleDueCalendar.isEmpty ? nil : appleDueCalendar))
+            let options = AppleSync.Options(tasks: appleTasksOn, steps: appleStepsOn, events: appleEventsOn,
+                                            reminderList: appleReminderList.isEmpty ? nil : appleReminderList,
+                                            otherTasksList: appleOtherList.isEmpty ? nil : appleOtherList,
+                                            importReminders: appleImportReminders,
+                                            eventCalendar: appleEventCalendar.isEmpty ? nil : appleEventCalendar,
+                                            dueCalendar: appleDueCalendar.isEmpty ? nil : appleDueCalendar, state: saved)
+            #if os(macOS)
+            let r = try await CalendarHelper.run(tasks: doc.tasks, events: doc.events, options: options)
+            #else
+            let r = try await appleSync.sync(tasks: doc.tasks, events: doc.events, options: options)
+            #endif
+            UserDefaults.standard.set(r.state, forKey: "appleSyncState")
+            lastAppleWrite = Date()
+            appleSyncError = r.warnings.isEmpty ? nil : r.warnings.joined(separator: "\n")
+            if !r.warnings.isEmpty { SyncLog.write("apple: warnings \(r.warnings)") }
             // Reminders you added in the Reminders app → assignments (class and long-term setup work like quick add).
             for item in r.imported where task(item.id) == nil {
                 let parsed = parse(item.title)
                 upsert(BrainTask(id: item.id, title: item.title, course: parsed.course, notes: item.notes,
                                  due: item.due ?? (parsed.kind == .task ? parsed.start : nil),
-                                 estimatedMinutes: parsed.durationMinutes ?? 30, priority: item.highPriority ? .high : .normal))
+                                 estimatedMinutes: parsed.durationMinutes ?? 30, priority: item.highPriority ? .high : .normal,
+                                 externalID: "reminder:\(item.id.uuidString)"))
                 setUpLongTermIfNeeded(item.id, explicit: false)
             }
             if !r.imported.isEmpty { show("\(r.imported.count) new from Reminders") }
-            appleSyncError = nil
+            SyncLog.write("apple: ok, imported \(r.imported.count), done-in-apple \(r.completedInApple.count), due moved \(r.dueChanged.count)")
             // Bring back what you changed in Calendar / Reminders.
             for id in r.completedInApple { if var t = task(id), !t.isCompleted { markDone(&t); upsert(t) } }
             for id in r.reopenedInApple { if var t = task(id), t.isCompleted { t.isCompleted = false; t.completedAt = nil; upsert(t) } }
-            for (id, step) in r.stepsDoneInApple { if var t = task(id) { finishStep(&t, step); upsert(t) } }
-            for (id, due) in r.dueChanged { if var t = task(id) { t.due = due; upsert(t) } }
+            for s in r.stepsDoneInApple { if var t = task(s.task) { finishStep(&t, s.step); upsert(t) } }
+            for d in r.dueChanged { if var t = task(d.task) { t.due = d.due; upsert(t) } }
             for e in r.eventsChanged { upsert(e) }
             if !r.completedInApple.isEmpty { show("Marked done from Apple Calendar ✓") }
         } catch {
             appleSyncError = error.localizedDescription
+            SyncLog.write("apple: error \(error)")
         }
     }
 
@@ -476,3 +494,65 @@ final class BrainStore: ObservableObject {
         Reminders.reschedule(events: occurrences(in: range), blocks: todayPlan?.blocks ?? [], leadMinutes: reminderLead)
     }
 }
+
+/// A small local log of background syncs (~/Library/Logs/Blob/sync.log), for figuring out sync problems.
+enum SyncLog {
+    static func write(_ line: String) {
+        let dir = FileManager.default.urls(for: .libraryDirectory, in: .userDomainMask)[0].appendingPathComponent("Logs/Blob")
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let url = dir.appendingPathComponent("sync.log")
+        let entry = "\(Date().formatted(.iso8601)) \(line)\n"
+        // Start over past ~500 KB.
+        let size = (try? FileManager.default.attributesOfItem(atPath: url.path)[.size] as? Int) ?? 0
+        if size > 500_000 { try? FileManager.default.removeItem(at: url) }
+        if let h = try? FileHandle(forWritingTo: url) {
+            _ = try? h.seekToEnd()
+            try? h.write(contentsOf: Data(entry.utf8))
+            try? h.close()
+        } else {
+            try? entry.write(to: url, atomically: true, encoding: .utf8)
+        }
+    }
+}
+
+#if os(macOS)
+import AppKit
+
+/// Runs Blob's Calendar & Reminders helper (Contents/MacOS/BlobCalendarHelper) for one sync.
+enum CalendarHelper {
+    struct Input: Encodable { var tasks: [BrainTask]; var events: [BrainEvent]; var options: AppleSync.Options }
+    struct Output: Decodable { var result: AppleSync.Result?; var error: String? }
+    struct Failure: LocalizedError { var message: String; var errorDescription: String? { message } }
+
+    static func run(tasks: [BrainTask], events: [BrainEvent], options: AppleSync.Options) async throws -> AppleSync.Result {
+        let exe = Bundle.main.bundleURL.appendingPathComponent("Contents/MacOS/BlobCalendarHelper")
+        guard FileManager.default.isExecutableFile(atPath: exe.path) else { throw Failure(message: "Blob's calendar helper is missing — reinstall Blob.") }
+        let input = try JSONEncoder().encode(Input(tasks: tasks, events: events, options: options))
+        let data: Data = try await withCheckedThrowingContinuation { cont in
+            DispatchQueue.global(qos: .utility).async {
+                let p = Process()
+                p.executableURL = exe
+                let inPipe = Pipe(), outPipe = Pipe()
+                p.standardInput = inPipe
+                p.standardOutput = outPipe
+                p.standardError = FileHandle.nullDevice
+                do { try p.run() } catch { cont.resume(throwing: error); return }
+                inPipe.fileHandleForWriting.write(input)
+                try? inPipe.fileHandleForWriting.close()
+                // Give up after two minutes rather than hang.
+                let timer = DispatchSource.makeTimerSource(queue: .global())
+                timer.schedule(deadline: .now() + 120)
+                timer.setEventHandler { if p.isRunning { p.terminate() } }
+                timer.resume()
+                let out = outPipe.fileHandleForReading.readDataToEndOfFile()
+                p.waitUntilExit()
+                timer.cancel()
+                cont.resume(returning: out)
+            }
+        }
+        let output = try JSONDecoder().decode(Output.self, from: data)
+        if let r = output.result { return r }
+        throw Failure(message: output.error ?? "Calendar sync didn't finish.")
+    }
+}
+#endif

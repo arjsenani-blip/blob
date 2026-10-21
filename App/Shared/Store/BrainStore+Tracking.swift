@@ -150,14 +150,31 @@ extension BrainStore {
     }
 
     /// Called after quick add: big assignments with a date far enough out get steps automatically.
-    func setUpLongTermIfNeeded(_ id: UUID, explicit: Bool) {
-        guard var t = task(id), t.milestones.isEmpty,
-              MilestonePlanner.looksLongTerm(title: t.title, due: t.due, explicit: explicit) else { return }
+    /// `explicit`: you said "long-term". `aiSuggested`: Blob's AI thought so — only honored when there are days to spread it over.
+    func setUpLongTermIfNeeded(_ id: UUID, explicit: Bool, aiSuggested: Bool = false) {
+        guard var t = task(id), t.milestones.isEmpty else { return }
+        let roomy = (t.due ?? .distantPast).timeIntervalSinceNow >= 3 * 86_400
+        guard MilestonePlanner.looksLongTerm(title: t.title, due: t.due, explicit: explicit) || (aiSuggested && roomy) else { return }
         if !t.estimateIsUserSet, let e = MilestonePlanner.defaultEstimate(title: t.title) { t.estimatedMinutes = e }
         t.startDate = Date()
         planSteps(&t)
         upsert(t)
         show("Tracking \(t.title) long-term · \(t.milestones.count) steps")
+    }
+
+    /// One-time fix: small assignments that got steps by mistake (an older Blob let its AI mark anything long-term).
+    func repairAccidentalSteps() {
+        guard !UserDefaults.standard.bool(forKey: "repairedAccidentalSteps") else { return }
+        UserDefaults.standard.set(true, forKey: "repairedAccidentalSteps")
+        for t in tasks where !t.milestones.isEmpty && !t.isCompleted {
+            let untouched = !t.milestones.contains(where: \.isDone) && t.sessions.isEmpty
+            let short = t.due.map { d in t.createdAt.map { d.timeIntervalSince($0) < 3.5 * 86_400 } ?? false } ?? false
+            guard untouched, short, !t.estimateIsUserSet else { continue }
+            var c = t
+            c.milestones = []
+            c.estimatedMinutes = min(c.estimatedMinutes, 60)
+            upsert(c)
+        }
     }
 
     // MARK: Summaries Blob can read out

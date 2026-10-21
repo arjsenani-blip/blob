@@ -433,3 +433,13 @@ final class HomeworkContextTests: XCTestCase {
         XCTAssertFalse(BrainTask(title: "Groceries", course: "errands").looksLikeSchoolwork)
     }
 }
+
+final class StepSuggestionTests: XCTestCase {
+    func testMacbethActIsNotTheACT() {
+        let now = Date()
+        let steps = MilestonePlanner.suggest(title: "English hw finish act 1 of macbeth", start: now, due: now.addingTimeInterval(5 * 86_400), totalMinutes: 120)
+        XCTAssertFalse(steps.map(\.title).contains("Practice test"))
+        XCTAssertTrue(MilestonePlanner.suggest(title: "ACT prep", start: now, due: now.addingTimeInterval(9 * 86_400), totalMinutes: 300).map(\.title).contains("Practice test"))
+        XCTAssertFalse(MilestonePlanner.looksLongTerm(title: "finish stats hw", due: now.addingTimeInterval(6 * 86_400)))
+    }
+}

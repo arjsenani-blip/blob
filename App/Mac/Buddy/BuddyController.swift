@@ -91,10 +91,10 @@ final class BuddyController: ObservableObject {
             .store(in: &bag)
 
         NotificationCenter.default.addObserver(forName: NSApplication.didChangeScreenParametersNotification, object: nil, queue: .main) { _ in
-            MainActor.assumeIsolated { BuddyController.shared.panel?.moveToCorner() }
+            Task { @MainActor in BuddyController.shared.panel?.moveToCorner() }
         }
         NotificationCenter.default.addObserver(forName: UserDefaults.didChangeNotification, object: nil, queue: .main) { _ in
-            MainActor.assumeIsolated { BuddyController.shared.applySettings() }
+            Task { @MainActor in BuddyController.shared.applySettings() }
         }
         fnKey.onTap = { [weak self] in self?.activate() }
         ChatterboxServer.shared.startIfNeeded()   // warms up the natural voice (only when plugged in)
@@ -107,7 +107,7 @@ final class BuddyController: ObservableObject {
             }
         }
         sleepTimer = Timer.scheduledTimer(withTimeInterval: 5, repeats: true) { _ in
-            MainActor.assumeIsolated {
+            Task { @MainActor in
                 let b = BuddyController.shared
                 if b.phase == .resting, !b.hovering, !b.sleeping, Date().timeIntervalSince(b.lastActive) > 90 {
                     b.sleeping = true
@@ -173,13 +173,15 @@ final class BuddyController: ObservableObject {
         p.orderFrontRegardless()
         panel = p
         NotificationCenter.default.addObserver(forName: NSWindow.didChangeOcclusionStateNotification, object: p, queue: .main) { _ in
-            MainActor.assumeIsolated {
+            Task { @MainActor in
                 let visible = BuddyController.shared.panel?.occlusionState.contains(.visible) ?? false
                 if BuddyController.shared.panelVisible != visible { BuddyController.shared.panelVisible = visible }
             }
         }
 
-        let handler: (NSEvent) -> Void = { _ in MainActor.assumeIsolated { BuddyController.shared.mouseMoved() } }
+        // Event monitors can fire inside nested run loops (EventKit, AppleScript); checking the actor there crashed Blob,
+        // so every callback hops onto the main actor as its own task instead.
+        let handler: (NSEvent) -> Void = { _ in Task { @MainActor in BuddyController.shared.mouseMoved() } }
         if let g = NSEvent.addGlobalMonitorForEvents(matching: [.mouseMoved, .leftMouseDragged], handler: handler) { mouseMonitors.append(g) }
         if let l = NSEvent.addLocalMonitorForEvents(matching: [.mouseMoved, .leftMouseDragged], handler: { e in handler(e); return e }) { mouseMonitors.append(l) }
         mouseMoved()
@@ -724,8 +726,8 @@ final class FnKeyMonitor {
     func start() {
         guard monitors.isEmpty else { return }
         _ = AXIsProcessTrustedWithOptions([kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary)
-        let flags: (NSEvent) -> Void = { e in MainActor.assumeIsolated { FnKeyMonitor.shared?.flagsChanged(e) } }
-        let keys: (NSEvent) -> Void = { _ in MainActor.assumeIsolated { FnKeyMonitor.shared?.otherKey = true } }
+        let flags: (NSEvent) -> Void = { e in Task { @MainActor in FnKeyMonitor.shared?.flagsChanged(e) } }
+        let keys: (NSEvent) -> Void = { _ in Task { @MainActor in FnKeyMonitor.shared?.otherKey = true } }
         if let m = NSEvent.addGlobalMonitorForEvents(matching: .flagsChanged, handler: flags) { monitors.append(m) }
         if let m = NSEvent.addLocalMonitorForEvents(matching: .flagsChanged, handler: { flags($0); return $0 }) { monitors.append(m) }
         if let m = NSEvent.addGlobalMonitorForEvents(matching: .keyDown, handler: keys) { monitors.append(m) }

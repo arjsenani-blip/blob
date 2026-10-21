@@ -208,6 +208,7 @@ extension MilestonePlanner {
     public static func looksLongTerm(title: String, due: Date?, now: Date = Date(), explicit: Bool = false) -> Bool {
         if explicit { return true }
         guard let due, due.timeIntervalSince(now) >= 4 * 86_400 else { return false }
+        if title.lowercased().range(of: #"\b(hw|homework|worksheet|problem set|pset)\b"#, options: .regularExpression) != nil { return false }
         return defaultEstimate(title: title) != nil
     }
 }

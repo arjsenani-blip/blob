@@ -28,6 +28,10 @@ targets:
       - App/Resources
     dependencies:
       - package: BrainCore
+      - target: BlobCalendarHelper
+        embed: true
+        copy:
+          destination: executables
     info:
       path: App/macOS/Info.plist
       properties:
@@ -51,6 +55,21 @@ targets:
         PROVISIONING_PROFILE_SPECIFIER: ""
         ENABLE_HARDENED_RUNTIME: NO
         COMBINE_HIDPI_IMAGES: YES
+  BlobCalendarHelper:
+    type: tool
+    platform: macOS
+    sources:
+      - App/Helper
+      - App/Shared/Services/AppleSync.swift
+    dependencies:
+      - package: BrainCore
+    settings:
+      base:
+        PRODUCT_NAME: BlobCalendarHelper
+        CODE_SIGN_STYLE: Manual
+        CODE_SIGN_IDENTITY: Apple Development
+        ENABLE_HARDENED_RUNTIME: NO
+        SKIP_INSTALL: YES
   ArjunsBrain-iOS:
     type: application
     platform: iOS

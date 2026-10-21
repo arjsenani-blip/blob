@@ -657,7 +657,7 @@ final class BuddyTools {
         let t = BrainTask(title: title, course: input["course"] as? String, due: due, estimatedMinutes: est ?? 30,
                           estimateIsUserSet: est != nil)
         store.upsert(t)
-        store.setUpLongTermIfNeeded(t.id, explicit: input["long_term"] as? Bool ?? false)
+        store.setUpLongTermIfNeeded(t.id, explicit: false, aiSuggested: input["long_term"] as? Bool ?? false)
         if let saved = store.task(t.id), !saved.milestones.isEmpty {
             return ToolOutput(text: "Added \(title)" + (due.map { ", due \($0.dueText())" } ?? "") + ", tracked long-term in steps: "
                 + saved.milestones.map { "\($0.title)" + ($0.due.map { " by \($0.dueText(includeTime: false))" } ?? "") }.joined(separator: "; ") + ".")

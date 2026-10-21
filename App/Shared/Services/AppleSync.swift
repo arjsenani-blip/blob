@@ -7,20 +7,22 @@ import BrainCore
 ///   on their due dates — tick one off in Calendar or Reminders and it's done in Blob too;
 /// - Blob's events go into a "Blob" calendar, so they're in Apple Calendar (and on your Watch, widgets…).
 /// Each item carries a blob:// link, so the Mac and iPhone (sharing iCloud) update the same items instead of duplicating them.
-@MainActor
-final class AppleSync {
+/// Runs on its own background actor with its own EventKit connection: EventKit calls can block and spin the run loop,
+/// and doing that on the main thread while a Swift task was running crashed Blob.
+actor AppleSync {
     static let calendarName = "Blob"
     /// The Reminders list homework goes in (made for you if you don't pick another).
     static let homeworkListName = "Homework"
-    private let ek: EKEventStore
+    private let ek = EKEventStore()
     private var running = false
     private var dirty = false
-    /// Our own writes also fire EKEventStoreChanged; ignore those.
-    private(set) var lastOwnWrite = Date.distantPast
+    private var state: [String: String] = [:]
+    /// Our own writes also fire EKEventStoreChanged; ignore those. (Read from the main thread; a stale value is harmless.)
+    nonisolated(unsafe) private(set) var lastOwnWrite = Date.distantPast
 
-    init(store: EKEventStore) { ek = store }
+    init() {}
 
-    struct Options {
+    struct Options: Codable {
         var tasks: Bool
         var steps: Bool
         var events: Bool
@@ -34,10 +36,12 @@ final class AppleSync {
         var eventCalendar: String? = nil
         /// Calendar to show assignment due dates (and steps) on as events; nil = off.
         var dueCalendar: String? = nil
+        /// Which lists/calendars were used last time (so items can be moved when you switch).
+        var state: [String: String] = [:]
     }
 
     /// A reminder you added in the Reminders app, to become a Blob assignment.
-    struct ImportedReminder {
+    struct ImportedReminder: Codable {
         var id: UUID
         var title: String
         var due: Date?
@@ -46,48 +50,64 @@ final class AppleSync {
         var highPriority: Bool
     }
 
-    struct Result {
+    struct StepDone: Codable { var task: UUID; var step: UUID }
+    struct DueChange: Codable { var task: UUID; var due: Date }
+
+    struct Result: Codable {
         var completedInApple: [UUID] = []
         var reopenedInApple: [UUID] = []
-        var stepsDoneInApple: [(task: UUID, step: UUID)] = []
-        var dueChanged: [(task: UUID, due: Date)] = []
+        var stepsDoneInApple: [StepDone] = []
+        var dueChanged: [DueChange] = []
+        var state: [String: String] = [:]
+        /// Parts that didn't work (the rest still synced).
+        var warnings: [String] = []
         var eventsChanged: [BrainEvent] = []
         var imported: [ImportedReminder] = []
     }
 
-    var isRecentOwnWrite: Bool { Date().timeIntervalSince(lastOwnWrite) < 3 }
+    nonisolated var isRecentOwnWrite: Bool { Date().timeIntervalSince(lastOwnWrite) < 3 }
 
     func sync(tasks: [BrainTask], events: [BrainEvent], options: Options) async throws -> Result {
         guard !running else { return Result() }
         running = true
         defer { running = false }
+        state = options.state
         var result = Result()
+        // Homework (by context) goes to the Homework list and the calendar. Something you added to that list yourself counts too.
+        let isHomework: (BrainTask) -> Bool = { $0.looksLikeSchoolwork || ($0.externalID?.hasPrefix("reminder:") ?? false) }
+        // Each part on its own: one failing (e.g. an account that won't take a new calendar) doesn't stop the others.
+        func part(_ name: String, _ work: () async throws -> Void) async {
+            do { try await work() } catch { result.warnings.append("\(name): \(error.localizedDescription)") }
+        }
         if options.tasks, EKEventStore.authorizationStatus(for: .reminder) == .fullAccess {
-            let list = try calendar(for: .reminder, id: options.reminderList)
-            let otherList = options.otherTasksList.flatMap { ek.calendar(withIdentifier: $0) }.flatMap { $0.allowsContentModifications && $0 != list ? $0 : nil }
-            if UserDefaults.standard.string(forKey: "lastReminderList") != list.calendarIdentifier {
-                try await moveOffOtherCalendars(type: .reminder, keeping: list, setting: "lastReminderList", except: otherList)
-            }
-            // Homework (by context) → the Homework list. Something you put in that list yourself stays there.
-            let inHomeworkList = Set(await fetchReminders(in: [list]).compactMap { $0.url?.absoluteString })
-            let isHomework: (BrainTask) -> Bool = { $0.looksLikeSchoolwork || inHomeworkList.contains("blob://task/\($0.id.uuidString)") }
-            try await syncReminders(tasks.filter(isHomework), list: list, includeSteps: options.steps, importNew: options.importReminders, into: &result)
-            if let otherList {
-                try await syncReminders(tasks.filter { !isHomework($0) }, list: otherList, includeSteps: false, importNew: false, into: &result)
+            await part("Reminders") {
+                let list = try calendar(for: .reminder, id: options.reminderList)
+                let otherList = options.otherTasksList.flatMap { ek.calendar(withIdentifier: $0) }.flatMap { $0.allowsContentModifications && $0 != list ? $0 : nil }
+                if state["lastReminderList"] != list.calendarIdentifier {
+                    try await moveOffOtherCalendars(type: .reminder, keeping: list, setting: "lastReminderList", except: otherList)
+                }
+                try await syncReminders(tasks.filter(isHomework), list: list, includeSteps: options.steps, importNew: options.importReminders, into: &result)
+                if let otherList {
+                    try await syncReminders(tasks.filter { !isHomework($0) }, list: otherList, includeSteps: false, importNew: false, into: &result)
+                }
             }
         }
         if EKEventStore.authorizationStatus(for: .event) == .fullAccess {
             if options.events {
-                let cal = try calendar(for: .event, id: options.eventCalendar)
-                try await moveOffOtherCalendars(type: .event, keeping: cal, setting: "lastEventCalendar", prefix: "blob://event/")
-                try syncEvents(events, calendar: cal, into: &result)
+                await part("Blob's events") {
+                    let cal = try calendar(for: .event, id: options.eventCalendar)
+                    try await moveOffOtherCalendars(type: .event, keeping: cal, setting: "lastEventCalendar", prefix: "blob://event/")
+                    try syncEvents(events, calendar: cal, into: &result)
+                }
             }
-            if let id = options.dueCalendar, let cal = ek.calendar(withIdentifier: id), cal.allowsContentModifications {
-                try await moveOffOtherCalendars(type: .event, keeping: cal, setting: "lastDueCalendar", prefix: "blob://due/")
-                syncDueDates(tasks, calendar: cal, includeSteps: options.steps, into: &result)
-            } else if options.dueCalendar == nil, UserDefaults.standard.string(forKey: "lastDueCalendar") != nil {
-                // Turned off → take the due dates back off the calendar.
-                try await moveOffOtherCalendars(type: .event, keeping: nil, setting: "lastDueCalendar", prefix: "blob://due/")
+            await part("Due dates") {
+                if let id = options.dueCalendar, let cal = ek.calendar(withIdentifier: id), cal.allowsContentModifications {
+                    try await moveOffOtherCalendars(type: .event, keeping: cal, setting: "lastDueCalendar", prefix: "blob://due/")
+                    syncDueDates(tasks.filter(isHomework), calendar: cal, includeSteps: options.steps, into: &result)
+                } else if options.dueCalendar == nil, state["lastDueCalendar"] != nil {
+                    // Turned off → take the due dates back off the calendar.
+                    try await moveOffOtherCalendars(type: .event, keeping: nil, setting: "lastDueCalendar", prefix: "blob://due/")
+                }
             }
         }
         if dirty {
@@ -95,13 +115,14 @@ final class AppleSync {
             try ek.commit()
             dirty = false
         }
+        result.state = state
         return result
     }
 
     // MARK: Lists / calendars
 
     /// Every list or calendar Blob can write into (iCloud, Google, Exchange/Outlook, Yahoo… whatever is added to this device).
-    static func writableCalendars(_ ek: EKEventStore, _ type: EKEntityType) -> [EKCalendar] {
+    nonisolated static func writableCalendars(_ ek: EKEventStore, _ type: EKEntityType) -> [EKCalendar] {
         ek.calendars(for: type).filter(\.allowsContentModifications)
             .sorted { ($0.source.title, $0.title) < ($1.source.title, $1.title) }
     }
@@ -115,9 +136,9 @@ final class AppleSync {
     /// After you switch lists/calendars, Blob's items in the old one are removed (they're recreated in the new one).
     private func moveOffOtherCalendars(type: EKEntityType, keeping: EKCalendar?, setting: String, prefix: String = "blob://",
                                        except: EKCalendar? = nil) async throws {
-        let last = UserDefaults.standard.string(forKey: setting)
+        let last = state[setting]
         guard last != keeping?.calendarIdentifier else { return }
-        defer { UserDefaults.standard.set(keeping?.calendarIdentifier, forKey: setting) }
+        defer { state[setting] = keeping?.calendarIdentifier }
         guard last != nil else { return }      // first run: nothing to clean up
         let others = ek.calendars(for: type).filter {
             $0.calendarIdentifier != keeping?.calendarIdentifier && $0.calendarIdentifier != except?.calendarIdentifier && $0.allowsContentModifications
@@ -145,16 +166,23 @@ final class AppleSync {
     private func blobCalendar(for type: EKEntityType) throws -> EKCalendar {
         let name = type == .reminder ? Self.homeworkListName : Self.calendarName
         if let c = ek.calendars(for: type).first(where: { $0.title == name && $0.allowsContentModifications }) { return c }
-        let cal = EKCalendar(for: type, eventStore: ek)
-        cal.title = name
-        cal.cgColor = CGColor(red: 0.0, green: 0.78, blue: 0.95, alpha: 1)   // Blob cyan
-        // iCloud first so it reaches your other devices; otherwise wherever new items normally go.
-        let preferred = type == .reminder ? ek.defaultCalendarForNewReminders()?.source : ek.defaultCalendarForNewEvents?.source
-        cal.source = preferred
-            ?? ek.sources.first { $0.sourceType == .calDAV && $0.title.lowercased().contains("icloud") }
-            ?? ek.sources.first { $0.sourceType == .local }
-        try ek.saveCalendar(cal, commit: true)
-        return cal
+        // Some accounts (school Google, Exchange) don't let apps add calendars — try iCloud, then the default account, then On My Mac.
+        let defaultSource = type == .reminder ? ek.defaultCalendarForNewReminders()?.source : ek.defaultCalendarForNewEvents?.source
+        let candidates = [ek.sources.first { $0.sourceType == .calDAV && $0.title.lowercased().contains("icloud") }, defaultSource,
+                          ek.sources.first { $0.sourceType == .local }] + ek.sources.map { Optional($0) }
+        var tried = Set<String>()
+        for case let source? in candidates where tried.insert(source.sourceIdentifier).inserted {
+            guard !source.calendars(for: type).isEmpty || source.sourceType == .local else { continue }
+            let cal = EKCalendar(for: type, eventStore: ek)
+            cal.title = name
+            cal.cgColor = CGColor(red: 0.0, green: 0.78, blue: 0.95, alpha: 1)   // Blob cyan
+            cal.source = source
+            if (try? ek.saveCalendar(cal, commit: true)) != nil { return cal }
+        }
+        // Nowhere allows a new one → use your main list/calendar.
+        if let fallback = type == .reminder ? ek.defaultCalendarForNewReminders() : ek.defaultCalendarForNewEvents,
+           fallback.allowsContentModifications { return fallback }
+        throw EKError(.calendarIsImmutable)
     }
 
     // MARK: Assignments → Reminders (shown in Calendar)
@@ -204,7 +232,7 @@ final class AppleSync {
                 } else if let r, let d = r.dueDateComponents.flatMap({ Calendar.current.date(from: $0) }),
                           let due = t.due, abs(d.timeIntervalSince(due)) > 60,
                           (r.lastModifiedDate ?? .distantPast) > t.updatedAt.addingTimeInterval(1) {
-                    result.dueChanged.append((t.id, d))
+                    result.dueChanged.append(DueChange(task: t.id, due: d))
                 } else {
                     write(r ?? EKReminder(eventStore: ek), list: list, key: key, title: t.title, due: t.due,
                           done: t.isCompleted, notes: notes(for: t), priority: t.priority)
@@ -216,7 +244,7 @@ final class AppleSync {
                 wanted.insert(mkey)
                 let r = existing[mkey]
                 if let r, r.isCompleted, !m.isDone, (r.lastModifiedDate ?? .distantPast) > t.updatedAt.addingTimeInterval(1) {
-                    result.stepsDoneInApple.append((t.id, m.id))
+                    result.stepsDoneInApple.append(StepDone(task: t.id, step: m.id))
                 } else {
                     write(r ?? EKReminder(eventStore: ek), list: list, key: mkey, title: "\(t.title): \(m.title)",
                           due: m.due, done: m.isDone, notes: "Step of \(t.title)" + (t.course.map { " · \($0)" } ?? ""), priority: .normal)
@@ -281,7 +309,7 @@ final class AppleSync {
                 if moved {
                     let start: Date = e.startDate, end: Date = e.endDate
                     let newDue: Date = e.isAllDay ? (Calendar.current.date(bySettingHour: 23, minute: 59, second: 0, of: start) ?? start) : end
-                    result.dueChanged.append((task: t.id, due: newDue))
+                    result.dueChanged.append(DueChange(task: t.id, due: newDue))
                     continue
                 }
             }
@@ -300,7 +328,7 @@ final class AppleSync {
         for (key, e) in existing where !wanted.contains(key) { try? ek.remove(e, span: .thisEvent, commit: false); dirty = true }
     }
 
-    static func isEndOfDay(_ d: Date) -> Bool {
+    nonisolated static func isEndOfDay(_ d: Date) -> Bool {
         let c = Calendar.current.dateComponents([.hour, .minute], from: d)
         return (c.hour == 23 && (c.minute ?? 0) >= 59) || (c.hour == 0 && c.minute == 0)
     }

@@ -470,7 +470,7 @@ struct PhoneAddTaskTool: Tool {
             let course = arguments.course.isEmpty ? store.parse(arguments.title).course : arguments.course
             let t = BrainTask(title: arguments.title, course: course, due: due)
             store.upsert(t)
-            store.setUpLongTermIfNeeded(t.id, explicit: arguments.long_term)
+            store.setUpLongTermIfNeeded(t.id, explicit: false, aiSuggested: arguments.long_term)
             if let s = store.task(t.id), !s.milestones.isEmpty {
                 return "Added \(arguments.title), tracked long-term in \(s.milestones.count) steps: " + s.milestones.map(\.title).joined(separator: ", ")
             }

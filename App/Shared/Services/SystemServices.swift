@@ -23,7 +23,7 @@ final class SystemCalendarBridge: ObservableObject {
         authorized = EKEventStore.authorizationStatus(for: .event) == .fullAccess
         remindersAuthorized = EKEventStore.authorizationStatus(for: .reminder) == .fullAccess
         NotificationCenter.default.addObserver(forName: .EKEventStoreChanged, object: store, queue: .main) { [weak self] _ in
-            MainActor.assumeIsolated {
+            Task { @MainActor in
                 self?.changeToken += 1
                 self?.onExternalChange?()
             }
