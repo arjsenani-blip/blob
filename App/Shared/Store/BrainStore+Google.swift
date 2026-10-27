@@ -22,7 +22,7 @@ extension BrainStore {
 
     /// Connect Google Calendar (+ Tasks) on one of your accounts, keeping what it can already do.
     func connectGoogleCalendar(on account: GoogleAccount) async {
-        await account.addScopes(GoogleAccount.calendarScopes + [GoogleAccount.tasksScope])
+        await account.addScopes(GoogleAccount.calendarScopes + [GoogleAccount.tasksScope, GoogleAccount.calendarAppScope])
         if account.hasScope(GoogleAccount.calendarScopes[0]) {
             googleCalendarOn = true
             await syncGoogle(force: true)
@@ -47,6 +47,25 @@ extension BrainStore {
                     defer { UserDefaults.standard.set(pushed, forKey: "googlePushed") }
                     try await sync.pushEvents(doc.events, pushed: &pushed)
                 }
+                // Due dates → events on your main calendar (removed again when the option is turned off).
+                var dueState = UserDefaults.standard.dictionary(forKey: "googleDuePushed") as? [String: Double] ?? [:]
+                if googleDueEventsOn || !dueState.isEmpty {
+                    defer { UserDefaults.standard.set(dueState, forKey: "googleDuePushed") }
+                    try await sync.mirror(googleDueEventsOn ? GoogleCalendarSync.dueEvents(doc.tasks) : [], state: &dueState)
+                }
+                // Logged work → the "Blob work log" calendar (or your main calendar without that permission).
+                var logState = UserDefaults.standard.dictionary(forKey: "googleLogPushed") as? [String: Double] ?? [:]
+                if googleLogEventsOn || !logState.isEmpty {
+                    defer { UserDefaults.standard.set(logState, forKey: "googleLogPushed") }
+                    let saved = UserDefaults.standard.string(forKey: "googleLogCalendar")
+                    let calID = try await logCalendarID(sync, account: acct, saved: saved)
+                    if calID != saved {
+                        // Moving calendars: the old events stay with the old calendar.
+                        logState = [:]
+                        UserDefaults.standard.set(calID, forKey: "googleLogCalendar")
+                    }
+                    try await sync.mirror(googleLogEventsOn ? GoogleCalendarSync.logEvents(doc.tasks) : [], calendarID: calID, state: &logState)
+                }
             }
             if googleTasksOn, let acct = tasksAccount {
                 let r = try await GoogleCalendarSync(account: acct).syncTasks(doc.tasks)
@@ -59,6 +78,15 @@ extension BrainStore {
             googleCalendarError = error.localizedDescription
         }
     }
+
+    /// Where logged work goes: Blob's own calendar when allowed, otherwise your main one.
+    private func logCalendarID(_ sync: GoogleCalendarSync, account: GoogleAccount, saved: String?) async throws -> String {
+        guard account.hasScope(GoogleAccount.calendarAppScope) else { return "primary" }
+        if let saved, saved != "primary" { return saved }
+        return try await sync.ownCalendar(named: "Blob work log")
+    }
+
+    var googleCanMakeLogCalendar: Bool { calendarAccount?.hasScope(GoogleAccount.calendarAppScope) ?? false }
 
     // MARK: Local cache of your Google events (not synced — each device reads Google itself)
 

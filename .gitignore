@@ -16,3 +16,5 @@ xcuserdata/
 windows/node_modules/
 windows/dist/
 *.exe
+build.log
+.build-request

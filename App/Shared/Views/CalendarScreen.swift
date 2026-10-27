@@ -27,7 +27,7 @@ struct CalendarScreen: View {
             .frame(maxWidth: 1000)
             .frame(maxWidth: .infinity)
         }
-        .background(Brand.canvas)
+
         .navigationTitle("Calendar")
         .sheet(item: $editingEvent) { EventEditor(event: $0) }
         .sheet(item: $editingTask) { TaskEditor(task: $0) }

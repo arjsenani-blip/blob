@@ -4,12 +4,12 @@ import BrainCore
 extension Pace {
     var color: Color {
         switch self {
-        case .done: return .green
+        case .done: return Brand.ok
         case .ahead: return .teal
         case .onTrack: return .blue
         case .behind: return .orange
         case .atRisk, .overdue: return .red
-        case .notStarted: return .secondary
+        case .notStarted: return .gray
         }
     }
     var icon: String {
@@ -35,7 +35,7 @@ struct ProgressRing: View {
             Circle().trim(from: 0, to: max(0.001, progress))
                 .stroke(color, style: StrokeStyle(lineWidth: size * 0.12, lineCap: .round))
                 .rotationEffect(.degrees(-90))
-            Text("\(Int(progress * 100))%").font(.system(size: size * 0.26, weight: .bold, design: .rounded))
+            Text("\(Int(progress * 100))%").font(.system(size: size * 0.26, weight: .bold)).foregroundStyle(Brand.inkStrong)
         }
         .frame(width: size, height: size)
         .animation(.spring(duration: 0.4), value: progress)
@@ -88,7 +88,7 @@ struct AssignmentDetail: View {
                     }
                     .padding(20)
                 }
-                .background(Brand.canvas)
+                .background(FrameBackground())
                 .navigationTitle(t.course ?? "Assignment")
                 .toolbar {
                     ToolbarItem(placement: .cancellationAction) { Button("Close") { dismiss() } }
@@ -113,7 +113,7 @@ struct AssignmentDetail: View {
         return HStack(alignment: .top, spacing: 16) {
             ProgressRing(progress: t.progress, color: pace.color, size: 72)
             VStack(alignment: .leading, spacing: 6) {
-                Text(t.title).font(.title2.weight(.bold)).fixedSize(horizontal: false, vertical: true)
+                Text(t.title).font(.title2.weight(.bold)).tracking(-0.4).foregroundStyle(Brand.inkStrong).fixedSize(horizontal: false, vertical: true)
                 HStack(spacing: 6) {
                     Chip(text: pace.label, icon: pace.icon, color: pace.color)
                     if let d = t.due { Chip(text: "Due " + d.dueText(), icon: "flag.fill", color: .orange) }
@@ -124,6 +124,22 @@ struct AssignmentDetail: View {
                     stat("Left", t.isCompleted ? "—" : "~" + Scheduler.durationText(t.remainingMinutes))
                     if let need = t.minutesPerDayNeeded(), !t.isCompleted { stat("Per day", Scheduler.durationText(need)) }
                 }
+                HStack(spacing: 8) {
+                    if !t.isCompleted {
+                        if store.focus?.taskID == t.id {
+                            Button { _ = store.stopFocus(log: true) } label: { Label("Stop & log", systemImage: "stop.fill") }
+                                .buttonStyle(TintButtonStyle(compact: true))
+                        } else {
+                            Button { store.startFocus(t) } label: { Label("Start timer", systemImage: "play.fill") }
+                                .buttonStyle(TintButtonStyle(compact: true))
+                        }
+                        Button { var c = t; store.markDone(&c); store.upsert(c) } label: { Label("Mark done", systemImage: "checkmark") }
+                            .buttonStyle(TintButtonStyle(kind: .glass, color: Brand.ok, compact: true))
+                    } else {
+                        Button { var c = t; c.isCompleted = false; c.completedAt = nil; store.upsert(c) } label: { Label("Reopen", systemImage: "arrow.uturn.backward") }
+                            .buttonStyle(TintButtonStyle(kind: .quiet, compact: true))
+                    }
+                }
                 if let link = t.link, let url = URL(string: link) {
                     Button { Platform.open(url) } label: { Label("Open in Classroom", systemImage: "arrow.up.right.square") }
                         .buttonStyle(.borderless).font(.subheadline)
@@ -131,40 +147,27 @@ struct AssignmentDetail: View {
             }
             Spacer(minLength: 0)
         }
-        .card()
+        .card(padding: 18)
     }
 
     private func stat(_ label: String, _ value: String) -> some View {
         VStack(alignment: .leading, spacing: 1) {
-            Text(value).font(.headline.monospacedDigit())
-            Text(label).font(.caption).foregroundStyle(.secondary)
+            Text(value).font(.headline.monospacedDigit()).foregroundStyle(Brand.inkStrong)
+            Text(label).font(.caption).foregroundStyle(Brand.muted)
         }
     }
 
     private func quickLog(_ t: BrainTask) -> some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("Log work").font(.headline)
-            HStack(spacing: 8) {
-                ForEach([15, 30, 45, 60, 90], id: \.self) { m in
-                    Button("+" + Scheduler.durationText(m)) { log(minutes: m, t) }
-                        .buttonStyle(.bordered).tint(Brand.violet)
-                }
-                Spacer()
-                if !t.isCompleted {
-                    Button { var c = t; store.markDone(&c); store.upsert(c) } label: { Label("Done", systemImage: "checkmark") }
-                        .buttonStyle(.borderedProminent).tint(.green)
-                }
-            }
+            if !t.isCompleted { LogComposer(fixedTaskID: t.id) }
             HStack {
-                Image(systemName: "text.bubble").foregroundStyle(.secondary)
+                Image(systemName: "text.bubble").foregroundStyle(Brand.faint)
                 TextField("Or say it: “worked 40 min, wrote the intro” · “finished the outline” · “60% done”", text: $logText)
                     .textFieldStyle(.plain)
                     .onSubmit { submitLog(t) }
             }
-            .padding(10)
-            .background(.primary.opacity(0.05), in: RoundedRectangle(cornerRadius: 10))
+            .paper(padding: 10)
         }
-        .card()
     }
 
     private func steps(_ t: BrainTask) -> some View {
@@ -177,7 +180,7 @@ struct AssignmentDetail: View {
                     store.planSteps(&c)
                     store.upsert(c)
                 }
-                .buttonStyle(.bordered).controlSize(.small)
+                .buttonStyle(TintButtonStyle(kind: .glass, compact: true))
             }
             if t.milestones.isEmpty {
                 Text("Break it into steps with their own dates so it moves forward a bit at a time. The check-in planner then works on one step at a time.")
@@ -220,7 +223,7 @@ struct AssignmentDetail: View {
                     store.upsert(c)
                     store.show("Grade saved")
                 }
-                .buttonStyle(.bordered)
+                .buttonStyle(TintButtonStyle(kind: .glass, compact: true))
                 if t.source == .classroom { Text("Classroom fills this in when it's returned.").font(.caption).foregroundStyle(.secondary) }
             }
             .textFieldStyle(.roundedBorder)
@@ -231,6 +234,10 @@ struct AssignmentDetail: View {
     private func history(_ t: BrainTask) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             Text("Work log").font(.headline)
+            if t.loggedMinutes > 0 {
+                Text("\(Scheduler.durationText(t.loggedMinutes)) over \(Set(t.sessions.map { Calendar.current.startOfDay(for: $0.date) }).count) day(s)")
+                    .font(.caption).foregroundStyle(Brand.muted)
+            }
             if t.sessions.isEmpty {
                 Text("Nothing logged yet. Time from the check-in timeline lands here automatically.").font(.subheadline).foregroundStyle(.secondary)
             }
@@ -315,7 +322,7 @@ private struct StepRow: View {
                 withAnimation { store.upsert(c) }
             } label: {
                 Image(systemName: step.isDone ? "checkmark.circle.fill" : "circle").font(.title3)
-                    .foregroundStyle(step.isDone ? Color.green : (late ? .red : Brand.violet))
+                    .foregroundStyle(step.isDone ? Brand.ok : (late ? Brand.stop : Brand.accent))
             }
             .buttonStyle(.plain)
             TextField("Step", text: $title)

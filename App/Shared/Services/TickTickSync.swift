@@ -1,14 +1,16 @@
-#if os(macOS)
 import Foundation
+import BrainCore
+#if os(macOS)
 import Network
 import AppKit
-import BrainCore
+#endif
 
-// TickTick (Mac): homework goes into a "Homework" project in TickTick, with long-term steps as checklist items.
-// Two-way: completing a task or checking a step in TickTick does the same in Blob, and tasks you add to the
-// Homework project come into Blob. The Mac does this; the iPhone and Windows get the results through Blob's own sync.
+// TickTick: homework goes into a "Homework" project in TickTick, with long-term steps as checklist items and each
+// class as a tag. Two-way: completing a task, checking a step or moving a due date in TickTick does the same in Blob,
+// and tasks you add to the Homework project come into Blob. Works on the Mac and the iPhone.
 //
-// TickTick's API needs your own free developer app (developer.ticktick.com) — its client ID and secret go in Settings.
+// Connecting: paste an access token (both devices), or on the Mac sign in through your own free developer app
+// (developer.ticktick.com) — Blob can then copy that sign-in to your iPhone.
 
 @MainActor
 final class TickTickAccount: ObservableObject {
@@ -54,6 +56,10 @@ final class TickTickAccount: ObservableObject {
         Keychain.delete(account: "ticktick")
     }
 
+    /// The current access token, to paste into Blob on your iPhone.
+    var tokenForOtherDevice: String? { token }
+
+    #if os(macOS)
     /// Opens TickTick's sign-in page in your browser and waits for it to come back to Blob on this Mac.
     func signIn() async {
         guard !clientID.isEmpty, !clientSecret.isEmpty else { lastError = "Add your TickTick client ID and secret first."; return }
@@ -87,6 +93,7 @@ final class TickTickAccount: ObservableObject {
             lastError = error.localizedDescription
         }
     }
+    #endif
 
     // MARK: API
 
@@ -123,6 +130,7 @@ enum TickTickError: LocalizedError {
     }
 }
 
+#if os(macOS)
 /// A one-shot web listener on 127.0.0.1 that catches TickTick's redirect with the sign-in code.
 enum LoopbackReceiver {
     static func waitForCode(port: UInt16, state: String, open: @escaping () -> Void) async throws -> String {
@@ -145,7 +153,7 @@ enum LoopbackReceiver {
                     let code = items.first { $0.name == "code" }?.value
                     let ok = code != nil && items.first { $0.name == "state" }?.value == state
                     let page = ok ? "You're connected — go back to Blob." : "TickTick sign-in didn't finish. Try again from Blob's Settings."
-                    let html = "<html><body style=\"font-family:-apple-system;background:#06121f;color:#bff;display:grid;place-items:center;height:100vh\"><h2>\(page)</h2></body></html>"
+                    let html = "<html><body style=\"font-family:-apple-system;background:linear-gradient(140deg,#f3fafc,#e3f0f5);color:#13212b;display:grid;place-items:center;height:100vh\"><h2>\(page)</h2></body></html>"
                     let response = "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: \(html.utf8.count)\r\nConnection: close\r\n\r\n\(html)"
                     conn.send(content: Data(response.utf8), completion: .contentProcessed { _ in conn.cancel() })
                     if path.hasPrefix("/ticktick") { finish(ok ? .success(code!) : .failure(TickTickError.noCode)) }
@@ -164,16 +172,22 @@ enum LoopbackReceiver {
     }
 }
 
+#endif
+
 // MARK: - Sync
 
 @MainActor
-struct TickTickSync {
+final class TickTickSync {
     let account: TickTickAccount
+    private var useTags = true
+    init(account: TickTickAccount) { self.account = account }
 
     struct Result {
         var completed: [UUID] = []
         var stepsDone: [(task: UUID, step: UUID)] = []
-        var imported: [(id: UUID, title: String, due: Date?, notes: String?)] = []
+        var imported: [(id: UUID, title: String, due: Date?, notes: String?, course: String?)] = []
+        /// Due dates you moved in TickTick.
+        var dueChanged: [(task: UUID, due: Date?)] = []
     }
 
     /// Finds (or makes) the project homework goes in.
@@ -200,8 +214,12 @@ struct TickTickSync {
     }
 
     /// `known`: Blob task id → TickTick task id from earlier syncs (so completed tasks can be found — TickTick only lists open ones).
-    func sync(tasks: [BrainTask], projectID: String, importNew: Bool, known: inout [String: String]) async throws -> Result {
+    func sync(tasks: [BrainTask], projectID: String, importNew: Bool, tags: Bool, known: inout [String: String]) async throws -> Result {
         var result = Result()
+        self.useTags = tags
+        // What Blob last sent as each task's due date, so a date moved in TickTick can be told apart from Blob's own.
+        var sentDue = UserDefaults.standard.dictionary(forKey: "tickTickSentDue") as? [String: String] ?? [:]
+        defer { UserDefaults.standard.set(sentDue, forKey: "tickTickSentDue") }
         let data = try await account.json("GET", "/project/\(projectID)/data") as? [String: Any]
         let open = data?["tasks"] as? [[String: Any]] ?? []
         var byKey: [String: [String: Any]] = [:]
@@ -215,7 +233,8 @@ struct TickTickSync {
                 // Added by you in TickTick → becomes an assignment; tag it so it's matched from now on.
                 let id = UUID.stable(from: "ticktick:\(tid)")
                 if !live.contains(id) {
-                    result.imported.append((id, title, Self.parse(t["dueDate"] as? String), content.isEmpty ? nil : content))
+                    let course = (t["tags"] as? [String])?.first.map { $0.replacingOccurrences(of: "-", with: " ").capitalized }
+                    result.imported.append((id, title, Self.parse(t["dueDate"] as? String), content.isEmpty ? nil : content, course))
                 }
                 var updated = t
                 updated["content"] = (content.isEmpty ? "" : content + "\n") + "blob://task/\(id.uuidString)"
@@ -247,10 +266,20 @@ struct TickTickSync {
                         checkedThere = true
                     }
                 }
+                // Due date moved in TickTick (different from what Blob last sent) → take it.
+                let remoteDue = remote["dueDate"] as? String
+                if let last = sentDue[t.id.uuidString], Self.parse(remoteDue) != Self.parse(last) {
+                    let allDay = remote["isAllDay"] as? Bool ?? false
+                    let d = Self.parse(remoteDue).map { allDay ? Calendar.current.date(bySettingHour: 23, minute: 59, second: 0, of: $0) ?? $0 : $0 }
+                    result.dueChanged.append((t.id, d))
+                    sentDue[t.id.uuidString] = remoteDue ?? ""
+                    checkedThere = true
+                }
                 // Blob takes those in first; next sync sends the rest back.
                 if checkedThere { continue }
-                let body = payload(t, projectID: projectID, id: tid, existingItems: items)
+                let body = payload(t, projectID: projectID, id: tid, existingItems: items, remoteTags: remote["tags"] as? [String])
                 if changed(remote, body) { _ = try? await account.json("POST", "/task/\(tid)", body: body) }
+                sentDue[t.id.uuidString] = (body["dueDate"] as? String) ?? ""
             } else if wanted {
                 if let tid = known[t.id.uuidString] {
                     // Gone from the open list → finished (or deleted) in TickTick.
@@ -260,8 +289,9 @@ struct TickTickSync {
                     known[t.id.uuidString] = nil
                     if t.updatedAt < Date().addingTimeInterval(-60) { continue }   // you deleted it there; don't bring it back
                 }
-                let made = try await account.json("POST", "/task", body: payload(t, projectID: projectID, id: nil, existingItems: [])) as? [String: Any]
-                if let tid = made?["id"] as? String { known[t.id.uuidString] = tid }
+                let body = payload(t, projectID: projectID, id: nil, existingItems: [], remoteTags: nil)
+                let made = try await account.json("POST", "/task", body: body) as? [String: Any]
+                if let tid = made?["id"] as? String { known[t.id.uuidString] = tid; sentDue[t.id.uuidString] = (body["dueDate"] as? String) ?? "" }
             } else if t.isCompleted, (t.completedAt ?? .distantPast) > recentlyDone, let tid = known[t.id.uuidString] {
                 _ = try? await account.send("POST", "/project/\(projectID)/task/\(tid)/complete")
                 known[t.id.uuidString] = nil
@@ -270,12 +300,27 @@ struct TickTickSync {
         return result
     }
 
-    private func payload(_ t: BrainTask, projectID: String, id: String?, existingItems: [[String: Any]]) -> [String: Any] {
-        var lines = [t.course, t.isLongTerm && !t.isCompleted ? "\(Int(t.progress * 100))% done · \(t.pace().label)" : nil, t.link].compactMap { $0 }
+    /// A tag name from a class: "AP Chemistry" → "ap-chemistry".
+    static func tag(for course: String) -> String {
+        course.lowercased().components(separatedBy: CharacterSet.alphanumerics.inverted).filter { !$0.isEmpty }.joined(separator: "-")
+    }
+
+    private func payload(_ t: BrainTask, projectID: String, id: String?, existingItems: [[String: Any]], remoteTags: [String]?) -> [String: Any] {
+        let progress: String? = t.isCompleted ? nil
+            : t.isLongTerm ? "\(Int(t.progress * 100))% done · \(t.pace().label)"
+            : t.loggedMinutes > 0 ? "\(Scheduler.durationText(t.loggedMinutes)) logged" : nil
+        var lines = [t.course, progress, t.link].compactMap { $0 }
         lines.append("blob://task/\(t.id.uuidString)")
         var b: [String: Any] = ["title": t.title, "projectId": projectID, "content": lines.joined(separator: "\n"),
                                 "priority": t.priority == .high ? 5 : (t.priority == .low ? 1 : 0), "timeZone": TimeZone.current.identifier]
         if let id { b["id"] = id }
+        if useTags, let c = t.course, !c.isEmpty {
+            // Keep any tags you added in TickTick; make sure the class tag is there.
+            var tags = remoteTags ?? []
+            let mine = Self.tag(for: c)
+            if !tags.contains(mine) { tags.append(mine) }
+            b["tags"] = tags
+        } else if let remoteTags { b["tags"] = remoteTags }
         if let due = t.due {
             let allDay = AppleSync.isEndOfDay(due)
             b["isAllDay"] = allDay
@@ -297,10 +342,10 @@ struct TickTickSync {
     private func changed(_ remote: [String: Any], _ body: [String: Any]) -> Bool {
         func s(_ v: Any?) -> String { v.map { "\($0)" } ?? "" }
         if s(remote["title"]) != s(body["title"]) || s(remote["content"]) != s(body["content"]) || s(remote["priority"]) != s(body["priority"]) { return true }
+        if Set(remote["tags"] as? [String] ?? []) != Set(body["tags"] as? [String] ?? []) { return true }
         if Self.parse(remote["dueDate"] as? String) != (body["dueDate"] as? String).flatMap(Self.parse) { return true }
         let ri = (remote["items"] as? [[String: Any]] ?? []).map { "\(s($0["title"]))=\(s($0["status"]))" }
         let bi = (body["items"] as? [[String: Any]] ?? []).map { "\(s($0["title"]))=\(s($0["status"]))" }
         return ri != bi
     }
 }
-#endif

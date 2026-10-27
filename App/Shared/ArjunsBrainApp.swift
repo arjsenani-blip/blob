@@ -8,13 +8,14 @@ struct ArjunsBrainApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     #endif
     @Environment(\.scenePhase) private var scenePhase
+    @AppStorage("accent") private var accent = AccentChoice.cyan.rawValue
 
     private var mainWindow: some Scene {
-        WindowGroup("Blob's Brain") {
+        WindowGroup("Blob") {
             RootView()
                 .environmentObject(store)
-                .tint(Brand.violet)
-                .fontDesign(.rounded)
+                .tint(Brand.accent)
+                .id(accent)   // re-tint everything when you pick a new accent
                 .task { await store.onLaunch() }
                 .onChange(of: scenePhase) { if scenePhase == .active { store.becameActive() } }
         }
@@ -23,9 +24,10 @@ struct ArjunsBrainApp: App {
     var body: some Scene {
         #if os(macOS)
         mainWindow
-            .defaultSize(width: 1120, height: 780)
+            .defaultSize(width: 1160, height: 800)
             .commands {
                 CommandGroup(after: .newItem) {
+                    Button("Log Work…") { store.showLogSheet = true }.keyboardShortcut("l")
                     Button("Quick Add…") { store.showQuickAdd = true }.keyboardShortcut("k")
                     Button("Check In") { store.checkIn() }.keyboardShortcut("i")
                     Button("Sync Now") { Task { await store.syncEverything() } }.keyboardShortcut("r")
@@ -35,10 +37,10 @@ struct ArjunsBrainApp: App {
         MenuBarExtra {
             MenuBarPanel()
                 .environmentObject(store)
-                .tint(Brand.violet)
-                .fontDesign(.rounded)
+                .tint(Brand.accent)
+                .id(accent)
         } label: {
-            Image(nsImage: BlobMenuIcon.image)
+            MenuBarLabel().environmentObject(store)
         }
         .menuBarExtraStyle(.window)
         #else
@@ -48,22 +50,24 @@ struct ArjunsBrainApp: App {
 }
 
 enum AppTab: String, CaseIterable, Identifiable {
-    case today, calendar, tasks, settings
+    case today, tasks, activity, calendar, settings
     var id: String { rawValue }
     var title: String {
         switch self {
         case .today: return "Today"
-        case .calendar: return "Calendar"
         case .tasks: return "Assignments"
+        case .activity: return "Activity"
+        case .calendar: return "Calendar"
         case .settings: return "Settings"
         }
     }
     var icon: String {
         switch self {
-        case .today: return "sun.max.fill"
-        case .calendar: return "calendar"
+        case .today: return "sun.max"
         case .tasks: return "checklist"
-        case .settings: return "gearshape.fill"
+        case .activity: return "chart.bar.xaxis"
+        case .calendar: return "calendar"
+        case .settings: return "gearshape"
         }
     }
 }
@@ -71,13 +75,13 @@ enum AppTab: String, CaseIterable, Identifiable {
 struct RootView: View {
     @EnvironmentObject var store: BrainStore
     @State private var tab: AppTab? = .today
-    #if os(iOS)
-    @StateObject private var phoneBlob = PhoneBlob(store: BrainStore.shared)
-    #endif
 
     var body: some View {
         container
+            .background(FrameBackground())
             .sheet(isPresented: $store.showQuickAdd) { QuickAddSheet().environmentObject(store) }
+            .sheet(isPresented: $store.showLogSheet) { LogSheet(taskID: nil).environmentObject(store) }
+            .sheet(item: $store.logSheetTask) { LogSheet(taskID: $0.id).environmentObject(store) }
             .overlay(alignment: .top) {
                 if let t = store.toast { ToastView(text: t).padding(.top, 8) }
             }
@@ -91,8 +95,9 @@ struct RootView: View {
     private func screen(_ t: AppTab) -> some View {
         switch t {
         case .today: TodayView()
-        case .calendar: CalendarScreen()
         case .tasks: TasksScreen(school: store.school)
+        case .activity: ActivityScreen()
+        case .calendar: CalendarScreen()
         case .settings: SettingsScreen(school: store.school, personal: store.personal, systemCalendar: store.systemCalendar)
         }
     }
@@ -105,21 +110,32 @@ struct RootView: View {
                 Label(t.title, systemImage: t.icon).tag(t)
             }
             .safeAreaInset(edge: .top) {
-                HStack(spacing: 8) {
-                    BlobCharacter(mood: .idle, level: 0, look: .zero, fixedTime: 1.0)
-                        .frame(width: 30, height: 30)
-                    Text("Blob's Brain").font(.headline)
+                HStack(spacing: 10) {
+                    AppMark(size: 28)
+                    Text("Blob").font(.headline.weight(.bold)).tracking(-0.3)
                     Spacer()
                 }
-                .padding(.horizontal, 16).padding(.vertical, 8)
+                .padding(.horizontal, 16).padding(.vertical, 10)
             }
-            .safeAreaInset(edge: .bottom) { SyncBadge().padding(12) }
-            .navigationSplitViewColumnWidth(min: 190, ideal: 210)
+            .safeAreaInset(edge: .bottom) {
+                VStack(alignment: .leading, spacing: 10) {
+                    if store.focus != nil { FocusPill() }
+                    SyncBadge()
+                }
+                .padding(12)
+            }
+            .navigationSplitViewColumnWidth(min: 200, ideal: 220)
         } detail: {
-            NavigationStack { screen(tab ?? .today) }
+            NavigationStack {
+                screen(tab ?? .today)
+                    .scrollContentBackground(.hidden)
+                    .background(FrameBackground())
+            }
         }
         .toolbar {
-            ToolbarItem(placement: .primaryAction) {
+            ToolbarItemGroup(placement: .primaryAction) {
+                Button { store.showLogSheet = true } label: { Label("Log work", systemImage: "square.and.pencil") }
+                    .help("Log work (⌘L)")
                 Button { store.showQuickAdd = true } label: { Label("Quick Add", systemImage: "plus") }
                     .help("Quick add (⌘K)")
             }
@@ -127,12 +143,19 @@ struct RootView: View {
         #else
         TabView(selection: Binding(get: { tab ?? .today }, set: { tab = $0 })) {
             ForEach(AppTab.allCases) { t in
-                NavigationStack { screen(t) }
-                    .tabItem { Label(t.title, systemImage: t.icon) }
-                    .tag(t)
+                NavigationStack {
+                    screen(t)
+                        .scrollContentBackground(.hidden)
+                        .background(FrameBackground())
+                }
+                .tabItem { Label(t.title, systemImage: t.icon) }
+                .tag(t)
             }
         }
-        .overlay(alignment: .bottomTrailing) { PhoneBlobOverlay(blob: phoneBlob) }
+        .overlay(alignment: .bottom) {
+            // The running timer floats just above the tab bar.
+            if store.focus != nil { FocusPill().padding(.horizontal, 16).padding(.bottom, 64) }
+        }
         #endif
     }
 }
@@ -141,73 +164,78 @@ struct SyncBadge: View {
     @EnvironmentObject var store: BrainStore
     var body: some View {
         HStack(spacing: 6) {
-            if store.isSyncing {
+            if store.isSyncing || store.isSyncingGoogle || store.tickTickRunning {
                 ProgressView().controlSize(.mini)
                 Text("Syncing…")
-            } else if store.syncError != nil {
-                Image(systemName: "exclamationmark.icloud.fill").foregroundStyle(.orange)
-                Text("Sync problem")
-            } else if let d = store.lastSync, store.syncAccount != nil {
-                Image(systemName: "checkmark.icloud.fill").foregroundStyle(.green)
+            } else if store.syncError != nil || store.googleCalendarError != nil || store.tickTickError != nil {
+                Image(systemName: "exclamationmark.icloud.fill").foregroundStyle(Brand.caution)
+                Text("Sync problem — see Settings")
+            } else if let d = [store.lastSync, store.lastTickTickSync, store.lastGoogleRead].compactMap({ $0 }).max() {
+                Image(systemName: "checkmark.icloud.fill").foregroundStyle(Brand.ok)
                 Text("Synced \(d.formatted(.relative(presentation: .named)))")
             } else {
-                Image(systemName: "icloud.slash").foregroundStyle(.secondary)
+                Image(systemName: "icloud.slash").foregroundStyle(Brand.faint)
                 Text("Sync off")
             }
             Spacer()
         }
         .font(.caption)
-        .foregroundStyle(.secondary)
+        .foregroundStyle(Brand.muted)
     }
 }
 
 #if os(macOS)
-/// Menu bar quick panel: add anything and see what's next without opening the window.
+/// Menu bar icon: the check mark, or the running timer.
+struct MenuBarLabel: View {
+    @EnvironmentObject var store: BrainStore
+    var body: some View {
+        if let f = store.focus {
+            TimelineView(.periodic(from: .now, by: 30)) { _ in
+                Text("◉ \(Scheduler.durationText(f.minutes))")
+            }
+        } else {
+            Image(systemName: "checklist")
+        }
+    }
+}
+
+/// Menu bar panel: log work, run the timer, add anything, see what's next — without opening the window.
 struct MenuBarPanel: View {
     @EnvironmentObject var store: BrainStore
-    @Environment(\.openWindow) private var openWindow
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                BlobCharacter(mood: .idle, level: 0, look: .zero, fixedTime: 1.0)
-                    .frame(width: 24, height: 24)
-                Text("Blob").font(.headline)
+            HStack(spacing: 10) {
+                AppMark(size: 24)
+                Text("Blob").font(.headline.weight(.bold))
                 Spacer()
                 SyncBadge().fixedSize()
             }
-            QuickAddBar(autofocus: true)
-            Text("UP NEXT").font(.caption.weight(.bold)).foregroundStyle(.secondary)
+            if store.focus != nil { FocusPill() }
+            LogComposer(compact: true)
+            QuickAddBar()
+            Overline(text: "Up next")
             let next = upNext
-            if next.isEmpty { EmptyHint(icon: "sun.max.fill", text: "Nothing coming up.") }
+            if next.isEmpty { EmptyHint(icon: "sun.max", text: "Nothing coming up.") }
             ForEach(next, id: \.0) { item in
                 HStack {
                     Circle().fill(item.3).frame(width: 8, height: 8)
                     Text(item.1).lineLimit(1)
                     Spacer()
-                    Text(item.2).font(.caption).foregroundStyle(.secondary)
+                    Text(item.2).font(.caption).foregroundStyle(Brand.muted)
                 }
             }
             Divider()
-            Button {
-                BuddyController.shared.activate()
-            } label: {
-                Label("Talk to Blob (\(BuddyShortcut.current.label))", systemImage: "waveform")
-                    .frame(maxWidth: .infinity)
-            }
-            .buttonStyle(.bordered)
-            .tint(BuddyColors.cyan)
             HStack {
-                Button("Check in") { store.checkIn(); activate() }.buttonStyle(GradientButtonStyle()).controlSize(.small)
-                Button("Update Blob…") { BuddyController.shared.startUpdateRequest() }
+                Button("Check in") { store.checkIn(); activate() }.buttonStyle(TintButtonStyle(compact: true))
                 Spacer()
-                Button("Open app") { activate() }
-                Button("Quit") { NSApplication.shared.terminate(nil) }
+                Button("Open Blob") { activate() }.buttonStyle(TintButtonStyle(kind: .quiet, compact: true))
+                Button("Quit") { NSApplication.shared.terminate(nil) }.buttonStyle(TintButtonStyle(kind: .quiet, compact: true))
             }
         }
         .padding(16)
-        .frame(width: 380)
-        .background(Brand.canvas)
+        .frame(width: 400)
+        .background(FrameBackground())
     }
 
     private func activate() {
@@ -231,37 +259,34 @@ struct MenuBarPanel: View {
         return items.sorted { $0.0 < $1.0 }.prefix(5).map(\.1)
     }
 }
-#endif
 
-#if os(macOS)
 /// `ArjunsBrain -snapshot /path/prefix` saves a PNG of each tab, then quits. Used to check the UI from scripts.
 enum WindowSnapshot {
     @MainActor
     static func runIfRequested(store: BrainStore, select: (AppTab) -> Void) async {
         guard let prefix = UserDefaults.standard.string(forKey: "snapshot") else { return }
         if UserDefaults.standard.bool(forKey: "snapshotCheckIn") { store.checkIn() }
+        func shoot(_ name: String) {
+            guard let view = NSApplication.shared.windows.first(where: { $0.canBecomeMain })?.contentView,
+                  let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) else { return }
+            view.cacheDisplay(in: view.bounds, to: rep)
+            try? rep.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: "\(prefix)-\(name).png"))
+        }
         for t in AppTab.allCases {
             select(t)
             try? await Task.sleep(for: .seconds(1.5))
-            guard let view = NSApplication.shared.windows.first(where: { $0.canBecomeMain })?.contentView,
-                  let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) else { continue }
-            view.cacheDisplay(in: view.bounds, to: rep)
-            try? rep.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: "\(prefix)-\(t.rawValue).png"))
+            shoot(t.rawValue)
         }
-        // The assignment tracker's other views.
         select(.tasks)
         for mode in ["Long-term", "Classes"] {
             UserDefaults.standard.set(mode, forKey: "assignmentsMode")
             try? await Task.sleep(for: .seconds(1.5))
-            guard let view = NSApplication.shared.windows.first(where: { $0.canBecomeMain })?.contentView,
-                  let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) else { continue }
-            view.cacheDisplay(in: view.bounds, to: rep)
-            try? rep.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: "\(prefix)-tasks-\(mode).png"))
+            shoot("tasks-\(mode)")
         }
         UserDefaults.standard.set("Upcoming", forKey: "assignmentsMode")
         if let t = store.pendingTasks.filter({ !$0.milestones.isEmpty }).min(by: { ($0.due ?? .distantFuture) > ($1.due ?? .distantFuture) }) {
             let host = NSHostingView(rootView: AssignmentDetail(taskID: t.id).environmentObject(store))
-            let win = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 600, height: 1100), styleMask: [.titled], backing: .buffered, defer: false)
+            let win = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 620, height: 1100), styleMask: [.titled], backing: .buffered, defer: false)
             win.contentView = host
             win.orderFront(nil)
             try? await Task.sleep(for: .seconds(1.5))
@@ -271,86 +296,13 @@ enum WindowSnapshot {
             }
             win.close()
         }
-        if UserDefaults.standard.bool(forKey: "snapshotOnlyWindow") { NSApplication.shared.terminate(nil); return }
-        let buddy = BuddyController.shared
-        let stages: [(String, () -> Void)] = [
-            ("buddy-1-sleepy", { buddy.stage(.awake, sleeping: true) }),
-            ("buddy-2-idle", { buddy.stage(.awake) }),
-            ("buddy-3-curious", { buddy.stage(.awake, hover: true) }),
-            ("buddy-4-listening", { buddy.stage(.listening) }),
-            ("buddy-5-thinking", { buddy.stage(.thinking) }),
-            ("buddy-6-speaking", { buddy.stage(.speaking) }),
-            ("buddy-7-happy", { buddy.stage(.awake, happy: true) }),
-            ("buddy-8-asking", { buddy.stage(.confirming) }),
-            ("buddy-9-error", { buddy.stage(.awake, error: true) }),
-        ]
-        for (name, apply) in stages {
-            apply()
-            try? await Task.sleep(for: .seconds(1.2))
-            guard let view = buddy.snapshotView,
-                  let rep = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: Int(view.bounds.width * 3), pixelsHigh: Int(view.bounds.height * 3),
-                                             bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false,
-                                             colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0) else { continue }
-            rep.size = view.bounds.size
-            view.cacheDisplay(in: view.bounds, to: rep)
-            try? rep.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: "\(prefix)-\(name).png"))
-        }
         NSApplication.shared.terminate(nil)
     }
 }
-#endif
 
-#if os(macOS)
 final class AppDelegate: NSObject, NSApplicationDelegate {
-    func applicationDidFinishLaunching(_ notification: Notification) {
-        MainActor.assumeIsolated {
-            BuddyController.shared.start(store: BrainStore.shared)
-            // `-renderIcons <folder>`: draw the app icon from the Blob character, then quit.
-            if let folder = UserDefaults.standard.string(forKey: "renderIcons") {
-                BlobIconArt.render(to: URL(fileURLWithPath: folder))
-                NSApplication.shared.terminate(nil)
-            }
-            // `-voiceFileTest <path>`: render one line with the natural voice (cleanup included) to a WAV, then quit.
-            if let path = UserDefaults.standard.string(forKey: "voiceFileTest") {
-                Task {
-                    if let url = await NaturalVoice.render("Good evening, sir. I've lined up your assignments for tonight. Your chemistry lab report is first, and if we keep a steady pace, you'll be done by ten.", speaker: NaturalVoice.speakerID) {
-                        try? FileManager.default.removeItem(atPath: path)
-                        try? FileManager.default.moveItem(at: url, to: URL(fileURLWithPath: path))
-                    }
-                    NSApplication.shared.terminate(nil)
-                }
-            }
-            // `-trainingSelfTest <log>`: record typing into a new TextEdit document, replay it into another, check, clean up, quit.
-            if let log = UserDefaults.standard.string(forKey: "trainingSelfTest") {
-                Task { await TrainingSelfTest.run(log: log); NSApplication.shared.terminate(nil) }
-            }
-            // `-speakTest "text"`: say one line with Blob's voice, report which engine spoke, then quit.
-            if let line = UserDefaults.standard.string(forKey: "speakTest") {
-                let out = SpeechOutput()
-                let start = Date()
-                FileHandle.standardError.write("voice engine: \(VoiceEngine.current.rawValue)\n".data(using: .utf8)!)
-                out.onFinished = {
-                    FileHandle.standardError.write(String(format: "finished speaking %.1fs after launch\n", Date().timeIntervalSince(start)).data(using: .utf8)!)
-                    NSApplication.shared.terminate(nil)
-                }
-                Task {
-                    // Give the natural voice up to 40 s to load so the test hears it, not the fallback.
-                    for _ in 0..<80 where VoiceEngine.current == .chatterbox && !ChatterboxServer.shared.isReady {
-                        try? await Task.sleep(for: .milliseconds(500))
-                    }
-                    FileHandle.standardError.write("chatterbox ready: \(ChatterboxServer.shared.isReady) after \(Int(Date().timeIntervalSince(start)))s\n".data(using: .utf8)!)
-                    out.speak(line)
-                }
-                objc_setAssociatedObject(NSApplication.shared, "speakTest", out, .OBJC_ASSOCIATION_RETAIN)
-            }
-        }
-    }
-
-    func applicationWillTerminate(_ notification: Notification) {
-        MainActor.assumeIsolated { ChatterboxServer.shared.stop() }
-    }
-
-    /// Closing the window keeps Blob and the menu bar icon running.
+    /// Closing the window keeps the menu bar panel (and a running timer) going.
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
 }
+
 #endif

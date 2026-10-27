@@ -8,6 +8,16 @@ final class BrainStore: ObservableObject {
     @Published private(set) var doc: BrainDocument
     @Published var showQuickAdd = false
     @Published var toast: String?
+    /// Opens the log sheet (⌘L), optionally on one assignment.
+    @Published var logSheetTask: IDBox?
+    @Published var showLogSheet = false
+    /// The running focus timer (this device only).
+    @Published var focus: FocusTimer? {
+        didSet {
+            if let f = focus, let d = try? JSONEncoder().encode(f) { UserDefaults.standard.set(d, forKey: "focusTimer") }
+            else { UserDefaults.standard.removeObject(forKey: "focusTimer") }
+        }
+    }
 
     @Published private(set) var isSyncing = false
     @Published private(set) var lastSync: Date?
@@ -39,6 +49,10 @@ final class BrainStore: ObservableObject {
     @AppStorage("googleCalendarOn") var googleCalendarOn = false
     @AppStorage("googleEventsPushOn") var googleEventsPushOn = false
     @AppStorage("googleTasksOn") var googleTasksOn = false
+    /// Assignment due dates as events on your main Google calendar.
+    @AppStorage("googleDueEventsOn") var googleDueEventsOn = false
+    /// Logged work sessions as events on a Google calendar — your calendar becomes a record of what you did.
+    @AppStorage("googleLogEventsOn") var googleLogEventsOn = false
     @Published var googleEventCache: [GoogleCalendarSync.CachedEvent] = []
     @Published var googleCalendarError: String?
     @Published var isSyncingGoogle = false
@@ -46,7 +60,8 @@ final class BrainStore: ObservableObject {
     private var googleTask: Task<Void, Never>?
     let appleSync = AppleSync()
     private var appleSyncRunning = false
-    var tickTickRunning = false
+    @Published var tickTickRunning = false
+    @Published var lastTickTickSync: Date?
     @Published var tickTickError: String?
     private var tickTickTask: Task<Void, Never>?
     /// When the last Apple sync wrote — its own Calendar/Reminders changes shouldn't trigger another sync.
@@ -76,9 +91,11 @@ final class BrainStore: ObservableObject {
         } else {
             doc = BrainDocument()
         }
+        focus = UserDefaults.standard.data(forKey: "focusTimer").flatMap { try? JSONDecoder().decode(FocusTimer.self, from: $0) }
         lastSync = UserDefaults.standard.object(forKey: "lastSync") as? Date
         lastClassroomSync = UserDefaults.standard.object(forKey: "lastClassroomSync") as? Date
         loadGoogleCache()
+        updateCourseColors()
     }
 
     // MARK: Lifecycle
@@ -96,9 +113,7 @@ final class BrainStore: ObservableObject {
             Task { @MainActor in
                 await self?.syncDevices()
                 await self?.syncGoogle()
-                #if os(macOS)
                 await self?.syncTickTick()
-                #endif
             }
         }
     }
@@ -112,9 +127,7 @@ final class BrainStore: ObservableObject {
         await syncDevices()
         await syncApple()
         await syncGoogle()
-        #if os(macOS)
         await syncTickTick()
-        #endif
         if school.isSignedIn, (lastClassroomSync ?? .distantPast) < Date().addingTimeInterval(-10 * 60) {
             await syncClassroom()
         }
@@ -272,7 +285,7 @@ final class BrainStore: ObservableObject {
             .makePlan(checkIn: now, tasks: tasks, busy: occurrences(in: horizon), progress: progress)
         doc.plans.append(plan)
         changed()
-        show(plan.blocks.contains { $0.kind == .task } ? "Your timeline is ready" : "Nothing due — you're free!")
+        show(plan.blocks.contains { $0.kind == .task } ? "Your plan is ready" : "Nothing due — you're free!")
     }
 
     func updateBlock(_ blockID: UUID, _ change: (inout PlanBlock) -> Void) {
@@ -401,6 +414,7 @@ final class BrainStore: ObservableObject {
             let final = SyncMerger.merge(doc, merged)
             if final != doc {
                 doc = final
+                updateCourseColors()
                 save()
                 rescheduleReminders()
             }
@@ -474,11 +488,19 @@ final class BrainStore: ObservableObject {
         }
     }
 
+    /// Gives each class its own color (first-seen order, so colors don't shuffle when you add a class).
+    func updateCourseColors() {
+        var index = Brand.courseIndex
+        let seen = doc.tasks.sorted { ($0.createdAt ?? .distantPast) < ($1.createdAt ?? .distantPast) }.compactMap { $0.course?.lowercased() }
+        for c in seen where index[c] == nil { index[c] = index.count }
+        Brand.courseIndex = index
+    }
+
     private func changed() {
+        updateCourseColors()
         save()
         rescheduleReminders()
         scheduleAppleSync()
-        #if os(macOS)
         if UserDefaults.standard.bool(forKey: "tickTickOn") {
             tickTickTask?.cancel()
             tickTickTask = Task {
@@ -487,8 +509,7 @@ final class BrainStore: ObservableObject {
                 await syncTickTick()
             }
         }
-        #endif
-        if googleEventsPushOn || googleTasksOn {
+        if googleEventsPushOn || googleTasksOn || googleDueEventsOn || googleLogEventsOn {
             googleTask?.cancel()
             googleTask = Task {
                 try? await Task.sleep(for: .seconds(4))

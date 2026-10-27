@@ -91,8 +91,8 @@ struct GoogleCalendarSync {
     static func googleID(_ id: UUID) -> String { "blob" + id.uuidString.lowercased().replacingOccurrences(of: "-", with: "") }
 
     /// Pushes events changed since the last push. `pushed` maps event id → the `updatedAt` last sent.
-    func pushEvents(_ events: [BrainEvent], pushed: inout [String: Double]) async throws {
-        let base = "https://www.googleapis.com/calendar/v3/calendars/primary/events"
+    func pushEvents(_ events: [BrainEvent], calendarID: String = "primary", pushed: inout [String: Double]) async throws {
+        let base = "https://www.googleapis.com/calendar/v3/calendars/\(Self.escape(calendarID))/events"
         for ev in events {
             let key = ev.id.uuidString
             let stamp = ev.updatedAt.timeIntervalSinceReferenceDate
@@ -117,6 +117,65 @@ struct GoogleCalendarSync {
                 }
             }
             pushed[key] = stamp
+        }
+    }
+
+    /// Keeps a generated set of events (due dates, logged work) on a calendar: pushes what changed and
+    /// removes what's no longer in the set. `state` maps event id → the `updatedAt` last sent.
+    func mirror(_ events: [BrainEvent], calendarID: String = "primary", state: inout [String: Double]) async throws {
+        let keep = Set(events.map(\.id.uuidString))
+        var gone: [BrainEvent] = []
+        for key in state.keys where !keep.contains(key) {
+            guard let id = UUID(uuidString: key) else { state[key] = nil; continue }
+            gone.append(BrainEvent(id: id, title: "", start: Date(), end: Date(), updatedAt: Date(), deleted: true))
+        }
+        try await pushEvents(gone + events, calendarID: calendarID, pushed: &state)
+        for e in gone { state[e.id.uuidString] = nil }
+    }
+
+    /// Finds (or makes) a calendar Blob owns, e.g. "Blob work log". Needs `calendarAppScope`.
+    func ownCalendar(named name: String) async throws -> String {
+        let list: CalendarList = try await get("https://www.googleapis.com/calendar/v3/users/me/calendarList?maxResults=250")
+        if let c = list.items?.first(where: { $0.summary == name && $0.accessRole == "owner" }) { return c.id }
+        let data = try await send("POST", "https://www.googleapis.com/calendar/v3/calendars",
+                                  body: ["summary": name, "description": "Work you logged in Blob.", "timeZone": TimeZone.current.identifier])
+        guard let id = (try JSONSerialization.jsonObject(with: data) as? [String: Any])?["id"] as? String else {
+            throw GoogleError.http(0, "Couldn't create the \(name) calendar.")
+        }
+        // Give it the accent color in the calendar list.
+        _ = try? await send("PATCH", "https://www.googleapis.com/calendar/v3/users/me/calendarList/\(Self.escape(id))?colorRgbFormat=true",
+                            body: ["backgroundColor": "#22d3ee", "foregroundColor": "#08131a"])
+        return id
+    }
+
+    /// Due dates as events: "Due: Lab report" at the due time (all-day when due by end of day).
+    static func dueEvents(_ tasks: [BrainTask]) -> [BrainEvent] {
+        let recent = Date().addingTimeInterval(-30 * 86_400)
+        return tasks.compactMap { t in
+            guard !t.deleted, let due = t.due, due > recent else { return nil }
+            let allDay = AppleSync.isEndOfDay(due)
+            let start = allDay ? Calendar.current.startOfDay(for: due) : due.addingTimeInterval(-15 * 60)
+            var notes = [t.course, t.isLongTerm && !t.isCompleted ? "\(Int(t.progress * 100))% done · \(t.pace().label)" : nil, t.link].compactMap { $0 }
+            notes.append("blob://task/\(t.id.uuidString)")
+            return BrainEvent(id: UUID.stable(from: "due:\(t.id.uuidString)"), title: (t.isCompleted ? "✓ " : "Due: ") + t.title,
+                              start: start, end: allDay ? start.addingTimeInterval(86_400) : due, isAllDay: allDay,
+                              notes: notes.joined(separator: "\n"), updatedAt: t.updatedAt)
+        }
+    }
+
+    /// Each logged work session as an event ending when it was logged: "Worked on Lab report · 45m".
+    static func logEvents(_ tasks: [BrainTask], days: Int = 60) -> [BrainEvent] {
+        let since = Date().addingTimeInterval(-Double(days) * 86_400)
+        return tasks.filter { !$0.deleted }.flatMap { t in
+            t.sessions.filter { $0.minutes > 0 && $0.date > since }.map { s in
+                let step = s.milestoneID.flatMap { id in t.milestones.first { $0.id == id }?.title }
+                let notes = [t.course, step.map { "Step: \($0)" }, s.note, "blob://task/\(t.id.uuidString)"].compactMap { $0 }
+                return BrainEvent(id: UUID.stable(from: "log:\(s.id.uuidString)"), title: "✎ \(t.title) · \(Scheduler.durationText(s.minutes))",
+                                  start: s.date.addingTimeInterval(-Double(s.minutes) * 60), end: s.date,
+                                  notes: notes.joined(separator: "\n"),
+                                  // A session doesn't change once it's logged.
+                                  updatedAt: s.date)
+            }
         }
     }
 

@@ -43,6 +43,8 @@ final class GoogleAccount: NSObject, ObservableObject, ASWebAuthenticationPresen
         "https://www.googleapis.com/auth/calendar.events",
         "https://www.googleapis.com/auth/calendar.calendarlist.readonly",
     ]
+    /// Lets Blob make its own "Blob work log" calendar for logged work (and only touch calendars it made).
+    static let calendarAppScope = "https://www.googleapis.com/auth/calendar.app.created"
     /// Assignments as Google Tasks, which Google Calendar shows as tasks on their due dates.
     static let tasksScope = "https://www.googleapis.com/auth/tasks"
 

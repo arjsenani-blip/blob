@@ -1,104 +1,46 @@
-# Blob 🫧
+# Blob
 
-*(formerly Arjun's Brain — the main window is **Blob's Brain**)*
+Blob is an **assignment log** for Mac and iPhone: track every assignment, log the time you spend and what you got done, and keep it all in sync with **TickTick** and **Google Calendar**. It's a native SwiftUI app; both devices share the same code and data.
 
-One app for your calendar, assignments, and a timeline for what to do right now. It's a native SwiftUI app for **Mac** and **iPhone/iPad** built from the same code, so both look and work the same way.
+> 2.0 dropped the voice assistant (the corner blob, voice, screen control and self-updates). Everything else got rebuilt around logging, with a new look.
 
 ## What it does
 
 | | |
 |---|---|
-| **Quick add** | Type normally and a live preview shows how it'll be saved. `Dentist tomorrow 3pm` · `Soccer every tue & thu 5-7pm @ Lincoln Field` · `Essay due fri ~90m #English` · `Call grandma in 2 hours` · `todo buy poster board !!`. It runs on-device, so you don't need an API key. |
-| **Calendar** | Month grid plus a day agenda. Events can repeat (daily, weekdays, weekly on chosen days, or monthly), and you can delete a single repeat. Shows your Apple Calendar and Google Calendar events too. |
-| **Long-term tracker** | Big assignments (projects, essays, studying for a test) get **dated steps**, a **work log**, **progress**, and a **pace**: ahead, on track, behind or at risk. Add one with `History project due nov 20 long-term`, or it happens automatically for big work. Assignments has **Upcoming / Long-term / Classes / Done** views: a 2-week workload chart, grade averages per class, and a detail page for every assignment. |
-| **Log in plain English** | Type it, or just tell Blob: `worked 45 min on the history essay` · `finished the outline for my english essay` · `got 92/100 on the chem lab` · `history project is 60% done` · `break the science project into steps`. Ask Blob *"am I on track?"* or *"how's my history project going?"* |
-| **Apple Calendar** (Mac + iPhone) | Assignments show up **as tasks in the Calendar app**, through a *Blob* list in Reminders. Ticking one off there marks it done in Blob. Blob's events can go into a *Blob* calendar. Turn it on in Settings → Apple Calendar. |
-| **Google Calendar** | Shows the calendars you have on in Google Calendar. It can add Blob's events to your Google Calendar, and add assignments as **Google Tasks**, which show as tasks in Google Calendar. Ticking one off there marks it done in Blob. |
-| **Google Classroom** | Pulls in assignments from your active classes, with due dates, turned-in and late status, and **grades** once they're returned. It keeps a semester of graded history and splits big assignments into steps automatically. Read-only: it never changes anything in Classroom. |
-| **Check in** | Builds a timeline from now until bedtime: it skips around your events, adds breaks, and orders work by urgency and by the time of day you checked in. Long-term assignments get their **next step** or **today's share**, so they move forward a bit every day instead of all the night before. Anything that won't fit gets flagged. Pressing ▶ / ✓ logs how long you actually took. |
-| **Sync** | Mac and iPhone sync through a hidden app-data folder in Google Drive. If you edit on both, each item keeps the newest edit. |
-| **Mac extras** | Menu-bar panel for quick add and up next, plus ⌘K quick add, ⌘I check in, and ⌘R sync. Reminders before events and when each work block starts. |
+| **Log work** | The log card on Today (and ⌘L anywhere): pick the assignment, tap a time (15m … 2h, or any amount), add a note if you want, mark the next step or the whole thing done. You can back-date an entry ("Earlier…"). |
+| **Focus timer** | ▶ on any assignment starts a timer. It shows in the sidebar, the menu bar and above the iPhone tab bar; **Log** stops it and puts the time in the work log. |
+| **Type it** | Quick add (⌘K) understands logging too: `worked 45 min on the history essay` · `finished the outline for my english essay` · `history project is 60% done` · `got 92/100 on the chem lab`. And adding: `Essay due fri ~90m #English` · `History project due nov 20 long-term`. |
+| **Activity** | Time today, this week, your day streak, a chart of time per class over 7/14/30 days, and the full log, grouped by day. |
+| **Assignments** | Upcoming / Long-term / Classes / Done. Long-term work gets dated steps, a pace (ahead, on track, behind, at risk) and how much a day you need. Swipe or right-click any row to log or start a timer. |
+| **TickTick** (Mac + iPhone) | Homework goes into a TickTick list, tagged with its class, with long-term steps as a checklist and logged time in the notes. Complete a task, check a step or move a due date in TickTick and Blob follows. Tasks you add to that list become assignments. |
+| **Google Calendar** | Shows your Google calendars, and can put on them: your events, **assignment due dates**, and **logged work** (each session becomes an event on a "Blob work log" calendar, so your calendar shows where your time went). Assignments can also be Google Tasks; tick one off in Google Calendar and it's done in Blob. |
+| **Google Classroom** | Pulls in assignments, due dates, turned-in/late status and grades (read-only). |
+| **Apple Calendar & Reminders** | Homework in a Reminders list, due dates on any calendar on the device. |
+| **Plan** | Check in and Blob lines up today's work around your events, with breaks, done by bedtime. |
+| **Sync** | Mac and iPhone sync through a hidden app folder in Google Drive; newest edit wins. |
+| **Look** | The Cooky design language (same as MediBro): a softly lit frame with drifting color, floating cards, tinted-glass controls, and one accent color you pick in Settings. |
 
-## Blob, your voice assistant (Mac)
+## Connecting TickTick
 
-Blob is the glowing cyan blob tucked into the bottom-right corner of your screen. It speaks like a British AI butler and calls you "sir".
+TickTick's API needs a sign-in for your account:
 
-**Talk to it**
-- **Tap the fn (🌐) key** on its own, then say your request. Or click Blob.
-- Set *System Settings → Keyboard → "Press 🌐 key to" → Do Nothing* so macOS doesn't also open the emoji picker. Blob needs Accessibility permission to see the fn key.
-- Blob doesn't listen in the background: the microphone only turns on after you tap fn or click Blob.
-- Right-click Blob to type instead of talking.
+- **On the Mac:** Settings → TickTick → *Connect with a developer app*. Make a free app at [developer.ticktick.com](https://developer.ticktick.com/manage), set its redirect URL to `http://127.0.0.1:8765/ticktick` (Blob shows a Copy button), paste the client ID and secret, and click **Connect TickTick**.
+- **On the iPhone:** on the Mac, click **Copy TickTick sign-in for my iPhone**, then paste it into Settings → TickTick on the iPhone (Universal Clipboard works). If your TickTick account gives you an API token, you can paste that on either device instead.
 
-**Free by default, mostly offline**
+Turn on **Sync homework with TickTick** on each device you want syncing; both update the same TickTick tasks, not copies.
 
-| Part | Runs | Costs |
-|---|---|---|
-| Speech recognition and voice | On your Mac, offline | Free |
-| Brain (default): Apple Intelligence | On your Mac, offline | Free |
-| Instant commands (open apps and sites, YouTube, music, search, volume, timers, schedule, check-in) | On your Mac | Free. YouTube and web pages need internet. |
-| Controlling app buttons, menus and typing (Accessibility) | On your Mac, offline | Free |
-| "Ask Claude …" (one question to Claude) | Claude Code on your **Pro plan**, needs internet | No extra charge; counts toward your Pro usage |
-| Optional "Claude API" brain (screenshot-based screen control) | Internet | **Paid per use.** Off unless you choose it and add a key. |
+## Google Calendar
 
-**Things to try:** tap fn, then say…
-- "play Interstellar soundtrack on YouTube"
-- "search for chem lab safety rules"
-- "open Gmail"
-- "play Drake on Spotify"
-- "volume 30"
-- "pause"
-- "what's on my schedule"
-- "check me in"
-- "I worked an hour on the science fair project"
-- "am I on track?"
-- "set a timer for 25 minutes"
-- "what's on my screen?"
-- "click the Sign In button"
-- "ask Claude why the sky is blue"
+Settings → Google Calendar → **Connect Google Calendar** on the account whose calendar you use (the first time, Blob asks for permission to make its own "Blob work log" calendar). Then turn on what you want:
 
-**Voice:** Blob speaks as **Chatterbox Daniel**: a calm British voice that sounds the most human. It runs entirely on your Mac and is free.
-- The voice model stays loaded while Blob runs, which uses about 3 GB of memory.
-- It takes about 20 seconds to warm up after launch. Until then, Blob uses the faster Kokoro Daniel voice.
-- Replies start a few seconds slower than with Kokoro.
-- You can switch to **Kokoro**, which is fast, or to **Apple**'s voice in Settings → Voice.
-- The voice files live in `~/Library/Application Support/ArjunsBrain/Voice`. Chatterbox comes from Resemble AI (MIT license) and adds an inaudible watermark marking its audio as AI-generated. Kokoro is Apache-2.0.
+- Show my Google Calendar events
+- Add my Blob events to Google Calendar
+- Assignments as Google Tasks
+- Put assignment due dates on my Google Calendar
+- Put logged work on Google Calendar
 
-**Permissions:** macOS asks for these the first time each is needed. Settings → *What Blob can do* has shortcuts to each.
-- Microphone and Speech Recognition, so Blob can hear you.
-- Accessibility, so it can click, type and use menus.
-- Screen Recording, so it can read your screen.
-
-**Battery:** there's no always-on microphone. Blob's animation slows down when it's tucked away or asleep, and stops when it's hidden. On battery, Blob uses the lighter Kokoro voice instead of Chatterbox, unless you turn on "Use the natural voice on battery" in Settings.
-
-**Updating Blob with Claude Code:** tap fn and say "update yourself to …", use **Update Blob…** (right-click Blob, or the menu bar), or go to Settings → *Blob updates*. While it works, Blob's bubble shows Claude Code's progress live.
-1. You approve the request with a click.
-2. Claude Code edits this project folder and rebuilds it. It's limited to file edits and build commands, and runs on your Pro plan with no extra charge.
-3. Blob shows you a summary and the list of changed files. Nothing installs until you click **Allow** a second time. If you say no, the code is put back the way it was.
-4. The previous app and code are backed up. Say "undo the last update" to go back.
-
-Blob's AI can never start an update by itself. The project folder has to stay in a permanent place for this to work; it's shown in Settings → *Blob updates* and can be changed there.
-
-Blob is Mac-only. iPhones don't allow an app to control the rest of the phone.
-
-## Blob for Windows
-
-The `windows/` folder is the Windows version: the corner Blob plus the **Blob's Brain** planner. It uses the same synced data as the Mac and iPhone.
-
-- **Install:** run `Blob-Setup-1.1.0.exe` from the [latest release](https://github.com/arjsenani-blip/blob/releases/latest). The installer isn't code-signed, so Windows shows "Windows protected your PC" the first time. Click **More info → Run anyway**.
-- **Talk:** press **Ctrl+Shift+B** anywhere, or click Blob in the bottom-right corner. Right-click Blob to open Blob's Brain. Blob also lives in the system tray.
-- **Voice:** the first time you talk, Blob offers to download its offline voice and hearing (about 380 MB, one time). It uses the same Daniel voice as the Mac, and Moonshine for speech recognition, both running on your PC. Until then you can type, and Blob answers with Windows' built-in voice.
-- **Brain:** instant commands work offline: open apps and sites, YouTube, music, search, volume and media keys, timers, schedule, check-in, adding assignments and events. Everything else goes to **Claude Code on your Pro plan** (install Claude Code on the PC and sign in). Replies stream, so Blob starts talking right away.
-- **Sync:** in Settings, paste a **Desktop app** OAuth client ID and secret from the same Google Cloud project as your Mac, then sign in. Data syncs with the Mac and iPhone through the same hidden Drive file.
-- **Build it yourself:**
-
-  ```bash
-  cd windows && npm install && npm test && npm run dist
-  ```
-
-  This makes `windows/dist/Blob-Setup-<version>.exe`. It builds on a Mac too.
-- **Tracker & calendars:** the long-term tracker, plain-English logging (typed or spoken), Google Calendar and Google Tasks all work on Windows too. Apple Calendar is Mac and iPhone only.
-
----
+If you connected Google Calendar in an older version, click **Allow** under *Put logged work on Google Calendar* so the work log gets its own calendar instead of your main one.
 
 ## 1. Install on your Mac
 
@@ -154,10 +96,11 @@ Packages/BrainCore/        Pure Swift logic + 40 unit tests (cd there and run `s
   Tracking                 steps, progress, pace, grades, workload
   Scheduler                check-in timeline
   SyncMerger / Models      data + newest-wins merge
-App/Mac/Blob/             Blob: corner panel + blob, voice, Claude / on-device brains, Mac tools
 App/Shared/                SwiftUI app shared by Mac and iOS
-  Services/                Google sign-in (PKCE), Classroom, Drive sync, Google Calendar/Tasks, Apple Calendar/Reminders sync
+  Services/                Google sign-in (PKCE), Classroom, Drive sync, Google Calendar/Tasks, TickTick, Apple Calendar/Reminders
   Store/BrainStore         app state, saves to ~/Library/Application Support/ArjunsBrain
-  Views/                   Today, Calendar, Assignments, Settings, editors, theme
+  Store/+Logging           focus timer, quick log, activity totals and streak
+  Views/                   Today, Assignments, Activity, Calendar, Settings, log views, editors
+  Views/Theme              the Cooky design language: frame, floating cards, tinted glass, one accent
 project.yml                XcodeGen spec (run `xcodegen generate` after adding files)
 ```

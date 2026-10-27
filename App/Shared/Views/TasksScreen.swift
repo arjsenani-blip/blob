@@ -60,11 +60,13 @@ struct TasksScreen: View {
             ForEach(groups) { g in
                 Section {
                     ForEach(g.tasks) { t in
-                        TaskRow(task: t)
+                        TaskRow(task: t, showActions: !showDone)
                             .contentShape(Rectangle())
                             .onTapGesture { detail = t.id }
                             .contextMenu {
                                 Button("Open") { detail = t.id }
+                                Button("Log work…") { store.logSheetTask = IDBox(id: t.id) }
+                                Button("Start timer") { store.startFocus(t) }
                                 Button("Edit") { editing = t }
                                 if let link = t.link, let url = URL(string: link) {
                                     Button("Open in Classroom") { Platform.open(url) }
@@ -74,6 +76,12 @@ struct TasksScreen: View {
                             .swipeActions {
                                 Button("Delete", role: .destructive) { store.delete(t) }
                             }
+                            .swipeActions(edge: .leading) {
+                                Button { store.logSheetTask = IDBox(id: t.id) } label: { Label("Log", systemImage: "square.and.pencil") }
+                                    .tint(Brand.accent)
+                                Button { store.startFocus(t) } label: { Label("Timer", systemImage: "play.fill") }
+                                    .tint(.blue)
+                            }
                     }
                 } header: {
                     HStack {
@@ -82,7 +90,7 @@ struct TasksScreen: View {
                         Text(Scheduler.durationText(g.tasks.reduce(0) { $0 + $1.estimatedMinutes }))
                     }
                     .font(.subheadline.weight(.bold))
-                    .foregroundStyle(g.id == "Overdue" ? .red : .secondary)
+                    .foregroundStyle(g.id == "Overdue" ? Brand.stop : Brand.muted)
                 }
             }
             }
@@ -93,7 +101,6 @@ struct TasksScreen: View {
         .listStyle(.inset)
         #endif
         .scrollContentBackground(.hidden)
-        .background(Brand.canvas)
         .navigationTitle("Assignments")
         .sheet(item: $editing) { TaskEditor(task: $0) }
         .sheet(item: Binding(get: { detail.map(IDBox.init) }, set: { detail = $0?.id })) { AssignmentDetail(taskID: $0.id) }
@@ -116,13 +123,13 @@ struct TasksScreen: View {
     @ViewBuilder
     private var classroomStatus: some View {
         HStack(spacing: 10) {
-            Image(systemName: "graduationcap.fill").foregroundStyle(.green)
+            Glyph(icon: "graduationcap", color: Brand.ok, size: 30)
             VStack(alignment: .leading, spacing: 2) {
                 if school.isSignedIn {
                     Text("Google Classroom").font(.subheadline.weight(.semibold))
                     Text(store.classroomError ?? (store.lastClassroomSync.map { "Synced \($0.formatted(.relative(presentation: .named)))" } ?? "Not synced yet"))
                         .font(.caption)
-                        .foregroundStyle(store.classroomError == nil ? Color.secondary : Color.red)
+                        .foregroundStyle(store.classroomError == nil ? Brand.muted : Brand.stop)
                         .lineLimit(2)
                 } else {
                     Text("Connect Google Classroom in Settings to pull in assignments.")
@@ -134,15 +141,15 @@ struct TasksScreen: View {
                 if store.isSyncingClassroom { ProgressView().controlSize(.small) }
                 else {
                     Button("Sync") { Task { await store.syncClassroom() } }
-                        .buttonStyle(.bordered).controlSize(.small)
+                        .buttonStyle(TintButtonStyle(kind: .glass, compact: true))
                 }
             }
         }
-        .card(padding: 12)
+        .card(padding: 12, bloom: false)
     }
 }
 
-struct IDBox: Identifiable { let id: UUID }
+struct IDBox: Identifiable, Hashable { let id: UUID }
 
 // MARK: - Long-term tracker
 
@@ -244,7 +251,7 @@ struct WorkloadChart: View {
             Chart {
                 ForEach(days, id: \.day) { d in
                     BarMark(x: .value("Day", d.day, unit: .day), y: .value("Minutes", d.minutes))
-                        .foregroundStyle(d.minutes > target ? AnyShapeStyle(Color.orange) : AnyShapeStyle(Brand.gradient))
+                        .foregroundStyle(d.minutes > target ? AnyShapeStyle(Color.orange.gradient) : AnyShapeStyle(Brand.accent.gradient))
                         .cornerRadius(4)
                 }
                 RuleMark(y: .value("Goal", target))
@@ -260,7 +267,7 @@ struct WorkloadChart: View {
             .chartXAxis { AxisMarks(values: .stride(by: .day, count: 2)) { _ in AxisValueLabel(format: .dateTime.weekday(.narrow).day()) } }
             .frame(height: 140)
         }
-        .card(padding: 14)
+        .card(padding: 14, bloom: false)
     }
 }
 
@@ -311,7 +318,7 @@ struct ClassesSection: View {
                         .sorted { ($0.isCompleted ? 1 : 0, $0.due ?? .distantFuture) < ($1.isCompleted ? 1 : 0, $1.due ?? .distantFuture) }
                     ForEach(ts) { t in
                         HStack {
-                            Image(systemName: t.isCompleted ? "checkmark.circle.fill" : "circle").foregroundStyle(t.isCompleted ? .green : .secondary)
+                            Image(systemName: t.isCompleted ? "checkmark.circle.fill" : "circle").foregroundStyle(t.isCompleted ? Brand.ok : Brand.faint)
                             Text(t.title).lineLimit(1)
                             Spacer()
                             if let p = t.percentGrade { Text("\(BrainStore.fmt(t.pointsEarned ?? 0))/\(BrainStore.fmt(t.maxPoints ?? 0)) · \(Int(p.rounded()))%").font(.caption.monospacedDigit()).foregroundStyle(.secondary) }

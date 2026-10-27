@@ -36,12 +36,12 @@ struct QuickAddBar: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 10) {
-                Image(systemName: "sparkles")
+                Image(systemName: "plus.circle")
                     .font(.title3.weight(.semibold))
-                    .foregroundStyle(Brand.gradient)
+                    .foregroundStyle(Brand.accentText)
                 TextField("Try “\(Self.examples[exampleIndex])”", text: $text)
                     .textFieldStyle(.plain)
-                    .font(.system(.body, design: .rounded))
+                    .font(.body)
                     .focused($focused)
                     .onSubmit(commit)
                     .submitLabel(.done)
@@ -50,7 +50,7 @@ struct QuickAddBar: View {
                     #endif
                 if parsed != nil {
                     Button(action: commit) {
-                        Image(systemName: "arrow.up.circle.fill").font(.title2).foregroundStyle(Brand.gradient)
+                        Image(systemName: "arrow.up.circle.fill").font(.title2).foregroundStyle(Brand.accent)
                     }
                     .buttonStyle(.plain)
                     .keyboardShortcut(.return, modifiers: [])
@@ -64,7 +64,7 @@ struct QuickAddBar: View {
                     .transition(.opacity.combined(with: .move(edge: .top)))
             }
         }
-        .card(padding: 14)
+        .card(padding: 14, bloom: false)
         .animation(.easeOut(duration: 0.15), value: parsed == nil)
         .onAppear { if autofocus { focused = true } }
         .onChange(of: text) { if text.isEmpty { override = nil } }
@@ -116,7 +116,7 @@ struct QuickAddBar: View {
                     Button("Add as to-do instead", systemImage: "checklist") { override = .task }
                     Button("Add as event instead", systemImage: "calendar") { override = .event }
                 } label: {
-                    Chip(text: "Log", icon: "chart.line.uptrend.xyaxis", color: .teal)
+                    Chip(text: "Log work", icon: "square.and.pencil", color: Brand.accent)
                 }
                 .menuStyle(.button).buttonStyle(.plain).fixedSize()
                 switch l.intent {
@@ -159,7 +159,7 @@ struct QuickAddSheet: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             HStack {
-                Text("Quick add").font(.title2.weight(.bold))
+                Text("Quick add").font(.title2.weight(.bold)).tracking(-0.4)
                 Spacer()
                 Button("Done") { dismiss() }.keyboardShortcut(.cancelAction)
             }
@@ -170,6 +170,6 @@ struct QuickAddSheet: View {
         }
         .padding(20)
         .frame(minWidth: 520)
-        .background(Brand.canvas)
+        .background(FrameBackground())
     }
 }

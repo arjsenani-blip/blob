@@ -14,11 +14,20 @@ struct SettingsScreen: View {
         Form {
             Section {
                 TextField("Your name", text: $store.displayName)
-            } header: { Text("You") }
+                AccentPicker()
+            } header: { Text("You") } footer: {
+                Text("The accent tints the whole app — buttons, glass, the glow behind cards.")
+            }
 
-            #if os(macOS)
-            BuddySettingsSection()
-            #endif
+            TickTickSection()
+
+            Section {
+                GoogleCalendarRows(school: school, personal: personal, clientMissing: clientID.isEmpty)
+            } header: {
+                Text("Google Calendar")
+            } footer: {
+                Text("Shows the calendars you have turned on in Google Calendar, and can put your events, assignment due dates and logged work on it. Assignments can also go in as Google Tasks, which Google Calendar shows on their due dates — tick one off there and it's done in Blob. Needs the Google Calendar API and Google Tasks API turned on in your Google Cloud project.")
+            }
 
             Section {
                 TextField("OAuth client ID", text: $clientID, prompt: Text("1234-abc.apps.googleusercontent.com"))
@@ -90,18 +99,6 @@ struct SettingsScreen: View {
 
             AppleCalendarSection(systemCalendar: systemCalendar)
 
-            #if os(macOS)
-            TickTickSection()
-            #endif
-
-            Section {
-                GoogleCalendarRows(school: school, personal: personal, clientMissing: clientID.isEmpty)
-            } header: {
-                Text("Google Calendar")
-            } footer: {
-                Text("Shows the calendars you have turned on in Google Calendar, can put Blob's events on your main Google calendar, and can add assignments as Google Tasks — which Google Calendar shows as tasks on their due dates. Needs the Google Calendar API and Google Tasks API turned on in your Google Cloud project.")
-            }
-
             Section {
                 Toggle("Reminders", isOn: Binding(
                     get: { store.remindersOn },
@@ -123,7 +120,6 @@ struct SettingsScreen: View {
         }
         .formStyle(.grouped)
         .scrollContentBackground(.hidden)
-        .background(Brand.canvas)
         .navigationTitle("Settings")
         .sheet(isPresented: $showSetupHelp) { SetupHelp() }
     }
@@ -168,7 +164,7 @@ private struct AccountRow: View {
                 if account.isWorking {
                     ProgressView().controlSize(.small)
                 } else if account.isSignedIn {
-                    Button("Sign out", role: .destructive) { account.signOut() }.buttonStyle(.bordered)
+                    Button("Sign out", role: .destructive) { account.signOut() }.buttonStyle(TintButtonStyle(kind: .quiet, compact: true))
                 } else {
                     Button("Sign in with Google") {
                         Task {
@@ -176,10 +172,13 @@ private struct AccountRow: View {
                             if account.isSignedIn { onSignedIn() }
                         }
                     }
-                    .buttonStyle(.borderedProminent)
-                    .tint(Brand.violet)
+                    .buttonStyle(TintButtonStyle(compact: true))
                     .disabled(disabled)
                 }
+            }
+            if disabled && !account.isSignedIn {
+                Label("Paste your OAuth client ID under Google setup first — then this button works.", systemImage: "arrow.down.circle")
+                    .font(.caption).foregroundStyle(Brand.caution)
             }
             if let err = account.lastError { Text(err).font(.caption).foregroundStyle(.red) }
         }
@@ -201,7 +200,7 @@ private struct SetupHelp: View {
                     Text("If signing in with your school account says it's blocked, your school's Google admin restricts outside apps. Ask IT to allow it, or use a personal Gmail for sync — Classroom needs the school account.")
                         .font(.footnote).foregroundStyle(.orange)
                     Link("Open Google Cloud Console", destination: URL(string: "https://console.cloud.google.com/apis/credentials")!)
-                        .buttonStyle(GradientButtonStyle())
+                        .buttonStyle(TintButtonStyle())
                 }
                 .padding(20)
             }
@@ -213,7 +212,8 @@ private struct SetupHelp: View {
 
     private func step(_ n: Int, _ text: LocalizedStringKey) -> some View {
         HStack(alignment: .top, spacing: 12) {
-            Text("\(n)").font(.headline).foregroundStyle(.white).frame(width: 28, height: 28).background(Brand.gradient, in: Circle())
+            Text("\(n)").font(.headline).foregroundStyle(Brand.accentText).frame(width: 28, height: 28)
+                .background(Brand.accent.opacity(0.2), in: Circle()).overlay(Circle().strokeBorder(Brand.accent.opacity(0.6)))
             Text(text)
         }
     }
@@ -230,10 +230,23 @@ private struct GoogleCalendarRows: View {
             LabeledContent("Connected", value: acct.email ?? "Google account")
             Toggle("Show my Google Calendar events", isOn: Binding(
                 get: { store.googleCalendarOn }, set: { store.googleCalendarOn = $0; Task { await store.syncGoogle(force: true) } }))
-            Toggle("Add Blob's events to Google Calendar", isOn: Binding(
+            Toggle("Add my Blob events to Google Calendar", isOn: Binding(
                 get: { store.googleEventsPushOn }, set: { store.googleEventsPushOn = $0; Task { await store.syncGoogle() } }))
             Toggle("Assignments as Google Tasks", isOn: Binding(
                 get: { store.googleTasksOn }, set: { store.googleTasksOn = $0; Task { await store.syncGoogle() } }))
+            Toggle("Put assignment due dates on my Google Calendar", isOn: Binding(
+                get: { store.googleDueEventsOn }, set: { store.googleDueEventsOn = $0; Task { await store.syncGoogle() } }))
+            Toggle("Put logged work on Google Calendar", isOn: Binding(
+                get: { store.googleLogEventsOn }, set: { store.googleLogEventsOn = $0; Task { await store.syncGoogle() } }))
+            if store.googleLogEventsOn && !store.googleCanMakeLogCalendar {
+                HStack {
+                    Text("Logged work goes on your main calendar. Allow Blob to make its own “Blob work log” calendar instead?")
+                        .font(.caption).foregroundStyle(Brand.muted)
+                    Spacer()
+                    Button("Allow") { if let a = store.calendarAccount { Task { await store.connectGoogleCalendar(on: a) } } }
+                        .buttonStyle(TintButtonStyle(kind: .glass, compact: true))
+                }
+            }
             Button {
                 Task { await store.syncGoogle(force: true) }
             } label: {
@@ -244,7 +257,7 @@ private struct GoogleCalendarRows: View {
                 }
             }
         } else {
-            Text(school.isSignedIn || personal.isSignedIn ? "Connect the account whose calendar you use." : "Sign in with Google above first.")
+            Text(school.isSignedIn || personal.isSignedIn ? "Connect the account whose calendar you use." : "First sign in with Google under Google setup and Google Classroom below.")
                 .font(.subheadline).foregroundStyle(.secondary)
         }
         ForEach([personal, school].filter { $0.isSignedIn && !$0.hasScope(GoogleAccount.calendarScopes[0]) }, id: \.role) { acct in
@@ -369,8 +382,7 @@ private struct AppleCalendarSection: View {
     }
 }
 
-#if os(macOS)
-/// TickTick: homework ↔ a TickTick project (two-way). Needs a free developer app's ID and secret.
+/// TickTick: homework ↔ a TickTick project (two-way), on the Mac and the iPhone.
 private struct TickTickSection: View {
     @EnvironmentObject var store: BrainStore
     @ObservedObject private var account = TickTickAccount.shared
@@ -379,23 +391,46 @@ private struct TickTickSection: View {
     @State private var project = ""
     @State private var showHelp = false
     @State private var apiToken = ""
+    @State private var copied = false
 
     var body: some View {
         Section {
             if account.isSignedIn {
+                HStack(spacing: 10) {
+                    Glyph(icon: "checkmark.circle", color: .blue, size: 30)
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text("TickTick connected").font(.body.weight(.semibold))
+                        Text(store.tickTickRunning ? "Syncing…" : store.lastTickTickSync.map { "Synced \($0.formatted(.relative(presentation: .named)))" } ?? "Not synced yet")
+                            .font(.caption).foregroundStyle(Brand.muted)
+                    }
+                    Spacer()
+                    Button("Sync now") { Task { await store.syncTickTick() } }
+                        .buttonStyle(TintButtonStyle(kind: .glass, compact: true))
+                        .disabled(!store.tickTickOn || store.tickTickRunning)
+                }
                 Toggle("Sync homework with TickTick", isOn: Binding(
                     get: { store.tickTickOn }, set: { store.tickTickOn = $0; if $0 { Task { await store.syncTickTick() } } }))
                 if store.tickTickOn {
-                    TextField("TickTick project", text: $project, prompt: Text("Homework"))
+                    TextField("TickTick list", text: $project, prompt: Text("Homework"))
                         .onSubmit { store.tickTickProject = project; Task { await store.syncTickTick() } }
-                    Toggle("Tasks I add to that project become assignments", isOn: Binding(
+                    Toggle("Tag tasks with their class", isOn: Binding(
+                        get: { store.tickTickTags }, set: { store.tickTickTags = $0; Task { await store.syncTickTick() } }))
+                    Toggle("Tasks I add to that list become assignments", isOn: Binding(
                         get: { store.tickTickImport }, set: { store.tickTickImport = $0 }))
-                    Button("Sync TickTick now") { Task { await store.syncTickTick() } }
                 }
+                #if os(macOS)
+                Button(copied ? "Copied — paste it into Blob on your iPhone" : "Copy TickTick sign-in for my iPhone") {
+                    if let t = account.tokenForOtherDevice {
+                        NSPasteboard.general.clearContents()
+                        NSPasteboard.general.setString(t, forType: .string)
+                        copied = true
+                    }
+                }
+                #endif
                 Button("Disconnect TickTick", role: .destructive) { account.signOut(); store.tickTickOn = false }
             } else {
                 HStack {
-                    SecureField("TickTick API token", text: $apiToken)
+                    SecureField("TickTick access token", text: $apiToken)
                     Button("Connect") {
                         Task {
                             await account.useToken(apiToken)
@@ -403,40 +438,48 @@ private struct TickTickSection: View {
                             if account.isSignedIn { store.tickTickOn = true; await store.syncTickTick() }
                         }
                     }
-                    .buttonStyle(.borderedProminent).tint(Brand.violet)
+                    .buttonStyle(TintButtonStyle(compact: true))
                     .disabled(apiToken.isEmpty || account.isWorking)
                 }
-                Text("In TickTick (web or app): your avatar → **Settings → Account → API Token** → create one and paste it here.")
-                    .font(.caption).foregroundStyle(.secondary)
-                DisclosureGroup("Or use a developer app instead") {
-                TextField("Client ID", text: $clientID)
-                SecureField("Client secret", text: $clientSecret)
-                HStack {
-                    Button("How do I get these?") { showHelp = true }
-                    Spacer()
-                    if account.isWorking { ProgressView().controlSize(.small) }
-                    Button("Connect TickTick") {
-                        Task {
-                            await account.signIn()
-                            if account.isSignedIn { store.tickTickOn = true; await store.syncTickTick() }
+                #if os(macOS)
+                Text("Paste a TickTick API token if your account has one, or connect through a free developer app below.")
+                    .font(.caption).foregroundStyle(Brand.muted)
+                DisclosureGroup("Connect with a developer app") {
+                    TextField("Client ID", text: $clientID)
+                    SecureField("Client secret", text: $clientSecret)
+                    HStack {
+                        Button("How do I get these?") { showHelp = true }
+                        Spacer()
+                        if account.isWorking { ProgressView().controlSize(.small) }
+                        Button("Connect TickTick") {
+                            Task {
+                                await account.signIn()
+                                if account.isSignedIn { store.tickTickOn = true; await store.syncTickTick() }
+                            }
                         }
+                        .buttonStyle(TintButtonStyle(compact: true))
+                        .disabled(clientID.isEmpty || clientSecret.isEmpty || account.isWorking)
                     }
-                    .buttonStyle(.bordered)
-                    .disabled(clientID.isEmpty || clientSecret.isEmpty || account.isWorking)
                 }
-                }
+                #else
+                Text("Easiest: connect TickTick on your Mac, then Settings → TickTick → **Copy TickTick sign-in for my iPhone**, and paste it here. Or paste a TickTick API token.")
+                    .font(.caption).foregroundStyle(Brand.muted)
+                #endif
             }
-            if let e = account.lastError ?? store.tickTickError { Text(e).font(.caption).foregroundStyle(.red) }
+            if let e = account.lastError ?? store.tickTickError { Text(e).font(.caption).foregroundStyle(Brand.stop) }
         } header: {
             Text("TickTick")
         } footer: {
-            Text("Homework (picked by context, same as Reminders) goes into a TickTick project, with the steps of long-term work as checklist items. Complete a task or check a step in TickTick and Blob does the same. Your Mac does the syncing; your iPhone and PC get it through Blob's sync.")
+            Text("Homework goes into a TickTick list, tagged with its class, with long-term steps as checklist items and time you've logged in the notes. Complete a task, check a step or move a due date in TickTick and Blob does the same. Tasks you add to the list come into Blob.")
         }
         .onAppear { project = store.tickTickProject == "Homework" ? "" : store.tickTickProject }
+        #if os(macOS)
         .sheet(isPresented: $showHelp) { TickTickHelp() }
+        #endif
     }
 }
 
+#if os(macOS)
 private struct TickTickHelp: View {
     @Environment(\.dismiss) private var dismiss
     var body: some View {
@@ -461,3 +504,28 @@ private struct TickTickHelp: View {
     }
 }
 #endif
+
+/// Cooky's swatches: pick the one accent that tints the app.
+private struct AccentPicker: View {
+    @AppStorage("accent") private var accent = AccentChoice.cyan.rawValue
+    var body: some View {
+        HStack(spacing: 10) {
+            Text("Accent")
+            Spacer()
+            ForEach(AccentChoice.allCases) { c in
+                let on = accent == c.rawValue
+                Button { accent = c.rawValue } label: {
+                    Circle().fill(c.color)
+                        .frame(width: 22, height: 22)
+                        .overlay { if on { Image(systemName: "checkmark").font(.caption2.weight(.heavy)).foregroundStyle(.white) } }
+                        .overlay(Circle().strokeBorder(.black.opacity(0.12)))
+                        .padding(3)
+                        .overlay(Circle().strokeBorder(on ? Brand.inkStrong : .clear, lineWidth: 2))
+                        .shadow(color: c.color.opacity(0.5), radius: 4, y: 2)
+                }
+                .buttonStyle(.plain)
+                .help(c.name)
+            }
+        }
+    }
+}
