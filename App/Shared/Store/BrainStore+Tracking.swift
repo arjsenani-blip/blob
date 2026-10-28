@@ -110,12 +110,20 @@ extension BrainStore {
     }
 
     func markDone(_ t: inout BrainTask) {
+        if !t.isCompleted { handOffRepeat(&t) }
         t.isCompleted = true
         t.completedAt = Date()
         for i in t.milestones.indices where !t.milestones[i].isDone {
             t.milestones[i].isDone = true
             t.milestones[i].doneAt = Date()
         }
+    }
+
+    /// A repeating to-do being finished adds its next copy (once — the finished one stops repeating).
+    func handOffRepeat(_ t: inout BrainTask) {
+        guard let next = t.nextOccurrence() else { return }
+        upsert(next)
+        t.repeats = nil
     }
 
     func setProgress(_ t: inout BrainTask, percent: Int) {

@@ -38,10 +38,35 @@ public struct NaturalLanguageParser {
     // MARK: Assignment vs. event
 
     /// Words that mean "school work with a due date", not "something happening at a time".
-    static let assignmentPattern = #"\b(home ?work|hw|assignment|essay|worksheet|problem ?set|pset|practice (problems|questions|set|test)|lab (report|write ?up)|write ?up|project|reading|read (ch|chapter|pages|pp)|chapters?|paper|report|study ?guide|study for|review for|notes|outline|rough draft|final draft|draft|annotations?|exercises|packet|journal|reflection|flashcards|vocab (list|cards|words)|discussion post|turn in|submit|finish|complete|do (the|my)|frq|dbq|leq|saq|lab\b)"#
+    static let assignmentPattern = #"\b(home ?work|hw|assignment|essay|worksheet|problem ?set|pset|practice (problems|questions|set|test)|lab (report|write ?up)|write ?up|project|reading|read (ch|chapter|pages|pp)|chapters?|paper|report|study ?guide|stud(y|ying)\b(?!\s+(group|hall|session|break|abroad))|review for|notes|outline|rough draft|final draft|draft|annotations?|exercises|packet|journal|reflection|flashcards|vocab (list|cards|words)|discussion post|turn in|submit|finish|complete|do (the|my)|frq|dbq|leq|saq|lab\b)"#
+
+    /// School work by its words alone ("Study 1 hour for Stats", "finish chem worksheet") and not an event ("study group", "math test").
+    public static func looksLikeAssignment(_ text: String) -> Bool {
+        let t = text.lowercased()
+        let work = t.range(of: assignmentPattern, options: .regularExpression) != nil
+        let event = t.range(of: eventPattern, options: .regularExpression) != nil
+            && t.range(of: #"\b(study|studying|review)\b.{0,24}\bfor\b"#, options: .regularExpression) == nil
+        return work && !event
+    }
+
+    /// A saved title that reads as something to do rather than somewhere to be ("Clean room", "Sign up for Peach State").
+    /// `allDay`: it has no time, so anything not event-like counts.
+    public static func looksLikeToDo(_ title: String, allDay: Bool) -> Bool {
+        let t = title.lowercased()
+        let eventy = t.range(of: eventPattern, options: .regularExpression) != nil
+        if t.range(of: choreLead, options: .regularExpression) != nil { return !(eventy && t.range(of: #"\bwith\b"#, options: .regularExpression) != nil) }
+        return allDay && !eventy && t.range(of: allDayEventPattern, options: .regularExpression) == nil
+    }
 
     /// Words that mean an actual event at a time or place.
     static let eventPattern = #"\b(practice|game|match|meet|meeting|appointment|appt|dentist|doctor|orthodontist|party|class|club|rehearsal|concert|recital|tryouts?|lesson|dinner|lunch|breakfast|movie|trip|flight|interview|tournament|session|test|exam|quiz|midterm|finals?(?!\s*draft)|ap exam|ceremony|assembly|conference|shift|work)\b"#
+
+    /// Errands and chores: something you *do*, not somewhere you *are* ("call mom tomorrow", "buy milk fri", "clean room 4pm").
+    /// Matched at the start, after optional filler like "need to" or "remember to".
+    static let choreLead = #"^\s*(?:(?:i\s+)?(?:need to|have to|gotta|got to|should|must|remember to|don'?t forget to|pls|please)\s+)?(?:call|phone|text|email|e-mail|message|dm|reply( to)?|respond( to)?|follow up|ask|tell|remind|thank|buy|get|grab|pick up|drop off|order|return|exchange|pay|venmo|deposit|renew|sign|print|scan|mail|send|ship|book|reserve|schedule|reschedule|cancel|confirm|register|sign up|apply|fill out|clean|tidy|wash|vacuum|sweep|mop|dust|laundry|do (?:the |my )?(?:laundry|dishes|chores)|fold|iron|take out|empty|charge|fix|repair|pack|unpack|water|feed|walk (?:the )?dog|shop|groceries|grocery|refill|restock|cook|bake|make (?:my |the )?bed|organi[sz]e|sort|declutter|look up|research|google|download|install|update|upload|back up|backup|delete|unsubscribe|change|replace|set up|setup|bring|put away|find|check|memorize|prep|prepare|finish)\b(?!\s+(?:with|call|meeting)\b)"#
+
+    /// Things that really are all-day events even with no time: "mom's birthday friday", "no school monday".
+    static let allDayEventPattern = #"\b(birthday|bday|anniversary|holiday|vacation|break|day off|no school|half day|early release|graduation|wedding|funeral|trip|camp|festival|fair|convention|tournament|meet|game|recital|concert|show|competition|deadline|exam|test|quiz|midterm|finals?)\b"#
 
     /// Common subject words → used to fill in the course when no known class name matches.
     static let subjects: [(pattern: String, name: String)] = [
@@ -145,7 +170,7 @@ public struct NaturalLanguageParser {
         let lowerInput = input.lowercased()
         let looksLikeAssignment = lowerInput.range(of: Self.assignmentPattern, options: .regularExpression) != nil
         let looksLikeEvent = lowerInput.range(of: Self.eventPattern, options: .regularExpression) != nil
-            && !(lowerInput.range(of: #"\b(study|review) for\b"#, options: .regularExpression) != nil)
+            && !(lowerInput.range(of: #"\b(study|studying|review)\b.{0,24}\bfor\b"#, options: .regularExpression) != nil)
         let today = calendar.startOfDay(for: now)
 
         var forcedTask = false
@@ -213,6 +238,10 @@ public struct NaturalLanguageParser {
             duration = minutes(amount: amount, unit: g[2] ?? "m")
         } else if let g = take(#"\b(\d+(?:\.\d+)?)\s*(hours?|hrs?|minutes?|mins?)\s+long\b"#, from: &text),
                   let amount = number(g[1] ?? "") {
+            duration = minutes(amount: amount, unit: g[2] ?? "m")
+        } else if looksLikeAssignment, let g = take(#"(?<=\s)(\d+(?:\.\d+)?|an?|one|two|three|half\s+an?)\s*(hours?|hrs?|hr|h|minutes?|mins?|min)\b"#, from: &text),
+                  let amount = number(g[1] ?? "") {
+            // School work: a bare "1 hour" / "45 min" is how long it takes ("Study 1 hour for Stats").
             duration = minutes(amount: amount, unit: g[2] ?? "m")
         }
 
@@ -377,7 +406,14 @@ public struct NaturalLanguageParser {
         // School work is an assignment (to-do with a due date) unless it clearly describes an event:
         // a time range, a repeating schedule, or event words like "practice", "meeting", "test".
         let assignmentByContext = looksLikeAssignment && !looksLikeEvent && endTime == nil && !recurrence.isRepeating
-        let isTask = forcedTask || assignmentByContext || (day == nil && time == nil && !recurrence.isRepeating)
+        // Errands and chores are to-dos, even at a time ("call mom 5pm" reminds you at 5) or repeating, unless it spans a time range.
+        let choreByContext = lowerInput.range(of: Self.choreLead, options: .regularExpression) != nil
+            && endTime == nil
+            && !(looksLikeEvent && lowerInput.range(of: #"\bwith\b"#, options: .regularExpression) != nil)
+        // A day with no time, no place and nothing event-like ("permission slip friday") is something to get done that day.
+        let dayOnlyTask = day != nil && time == nil && location == nil && !looksLikeEvent
+            && lowerInput.range(of: Self.allDayEventPattern, options: .regularExpression) == nil
+        let isTask = forcedTask || assignmentByContext || choreByContext || dayOnlyTask || (day == nil && time == nil && !recurrence.isRepeating)
         result.course = detectCourse(input)
         result.kind = isTask ? .task : .event
         result.hasExplicitTime = startTime != nil

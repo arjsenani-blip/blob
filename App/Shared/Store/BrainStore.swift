@@ -51,6 +51,19 @@ final class BrainStore: ObservableObject {
     /// Calendar that shows assignment due dates as events ("" = off). Any calendar on this device: iCloud, Google, Outlook…
     @AppStorage("appleDueCalendar") var appleDueCalendar = ""
     @Published private(set) var appleSyncError: String?
+    /// Remove exact duplicate copies of events from your calendars (every half hour, with undo).
+    @AppStorage("cleanDuplicateEvents") var cleanDuplicateEvents = true
+    var lastDuplicateCleanup: Date? {
+        get { UserDefaults.standard.object(forKey: "lastDuplicateCleanup") as? Date }
+        set { UserDefaults.standard.set(newValue, forKey: "lastDuplicateCleanup"); objectWillChange.send() }
+    }
+    var forceDuplicateCleanup = false
+    var pendingRestore: [AppleSync.RemovedEvent] = []
+    /// What the cleanup removed (newest first), so it can be put back.
+    @Published var removedDuplicates: [AppleSync.RemovedEvent] = (UserDefaults.standard.data(forKey: "removedDuplicates")
+        .flatMap { try? JSONDecoder().decode([AppleSync.RemovedEvent].self, from: $0) }) ?? [] {
+        didSet { UserDefaults.standard.set(try? JSONEncoder().encode(removedDuplicates), forKey: "removedDuplicates") }
+    }
     @AppStorage("googleCalendarOn") var googleCalendarOn = false
     @AppStorage("googleEventsPushOn") var googleEventsPushOn = false
     @AppStorage("googleTasksOn") var googleTasksOn = false
@@ -107,6 +120,8 @@ final class BrainStore: ObservableObject {
 
     func onLaunch() async {
         repairAccidentalSteps()
+        convertHomeworkEvents()
+        convertToDoEvents()
         _ = await Reminders.requestAuthorization()
         Pomodoro.shared.store = self
         Pomodoro.shared.catchUp()
@@ -121,6 +136,7 @@ final class BrainStore: ObservableObject {
                 await self?.syncDevices()
                 await self?.syncGoogle()
                 await self?.syncTickTick()
+                await self?.cleanDuplicatesIfDue()
             }
         }
     }
@@ -154,9 +170,9 @@ final class BrainStore: ObservableObject {
         var out = events.flatMap { $0.occurrences(in: range) }
         if useAppleCalendar { out += systemCalendar.occurrences(in: range) }
         out += googleCalendarOccurrences(in: range)
-        // The same event can arrive from more than one place (e.g. a Google calendar that's also in Apple Calendar).
-        var seen = Set<String>()
-        out = out.filter { seen.insert("\($0.title.lowercased())|\(Int($0.start.timeIntervalSince1970 / 60))|\($0.isAllDay)").inserted }
+        // The same event can arrive from more than one place (Apple's and Google's holiday calendars, an event copied into
+        // two accounts, a Google calendar that's also in Apple Calendar). Show one of each.
+        out = EventDeduper.dedupe(out)
         return out.sorted { ($0.isAllDay ? 0 : 1, $0.start) < ($1.isAllDay ? 0 : 1, $1.start) }
     }
 
@@ -199,9 +215,10 @@ final class BrainStore: ObservableObject {
             let cleanTitle = explicitLong ? title.replacingOccurrences(of: longPattern, with: " ", options: [.regularExpression, .caseInsensitive])
                 .trimmingCharacters(in: .whitespaces) : title
             let t = BrainTask(title: cleanTitle.isEmpty ? title : cleanTitle, course: p.course ?? p.tag, due: due, estimatedMinutes: p.durationMinutes ?? 30,
-                              priority: p.priority, estimateIsUserSet: p.durationMinutes != nil)
+                              priority: p.priority, estimateIsUserSet: p.durationMinutes != nil,
+                              repeats: p.recurrence.isRepeating ? p.recurrence : nil)
             upsert(t)
-            show("Added to-do: \(t.title)")
+            show("Added to-do: \(t.title)" + (t.repeats.map { " · " + $0.frequency.label.lowercased() } ?? ""))
             setUpLongTermIfNeeded(t.id, explicit: explicitLong)
             return t.title
         } else {
@@ -272,6 +289,7 @@ final class BrainStore: ObservableObject {
         var t = t
         t.isCompleted.toggle()
         t.completedAt = t.isCompleted ? Date() : nil
+        if t.isCompleted { handOffRepeat(&t) }
         upsert(t)
     }
 
@@ -458,17 +476,23 @@ final class BrainStore: ObservableObject {
         SyncLog.write("apple: start tasks=\(appleTasksOn) due=\(!appleDueCalendar.isEmpty) events=\(appleEventsOn)")
         // (Also runs once after due dates are turned off, to take them back off the calendar.)
         let saved = UserDefaults.standard.dictionary(forKey: "appleSyncState") as? [String: String] ?? [:]
-        guard appleTasksOn || appleEventsOn || !appleDueCalendar.isEmpty || saved["lastDueCalendar"] != nil, !isTestData,
-              !appleSyncRunning else { return }
+        // Duplicate cleanup rides along at most every 30 minutes (or right away when asked).
+        let cleanup = cleanDuplicateEvents && systemCalendar.authorized
+            && (forceDuplicateCleanup || (lastDuplicateCleanup ?? .distantPast) < Date().addingTimeInterval(-30 * 60))
+        let restore = pendingRestore
+        guard appleTasksOn || appleEventsOn || !appleDueCalendar.isEmpty || saved["lastDueCalendar"] != nil || cleanup || !restore.isEmpty,
+              !isTestData, !appleSyncRunning else { return }
         appleSyncRunning = true
         defer { appleSyncRunning = false }
         do {
-            let options = AppleSync.Options(tasks: appleTasksOn, steps: appleStepsOn, events: appleEventsOn,
+            var options = AppleSync.Options(tasks: appleTasksOn, steps: appleStepsOn, events: appleEventsOn,
                                             reminderList: appleReminderList.isEmpty ? nil : appleReminderList,
                                             otherTasksList: appleOtherList.isEmpty ? nil : appleOtherList,
                                             importReminders: appleImportReminders,
                                             eventCalendar: appleEventCalendar.isEmpty ? nil : appleEventCalendar,
                                             dueCalendar: appleDueCalendar.isEmpty ? nil : appleDueCalendar, state: saved)
+            options.cleanDuplicates = cleanup
+            options.restore = restore
             #if os(macOS)
             let r = try await CalendarHelper.run(tasks: doc.tasks, events: doc.events, options: options)
             #else
@@ -476,6 +500,21 @@ final class BrainStore: ObservableObject {
             #endif
             UserDefaults.standard.set(r.state, forKey: "appleSyncState")
             lastAppleWrite = Date()
+            if cleanup {
+                forceDuplicateCleanup = false
+                lastDuplicateCleanup = Date()
+                if !r.removedDuplicates.isEmpty {
+                    removedDuplicates = Array((r.removedDuplicates + removedDuplicates).prefix(200))
+                    show("Removed \(r.removedDuplicates.count) duplicate event\(r.removedDuplicates.count == 1 ? "" : "s")")
+                }
+                SyncLog.write("apple: duplicate cleanup removed \(r.removedDuplicates.count)")
+            }
+            if !restore.isEmpty {
+                let back = Set(restore.map(\.id))
+                pendingRestore = []
+                removedDuplicates.removeAll { back.contains($0.id) }
+                show("Put back \(r.restored) event\(r.restored == 1 ? "" : "s")")
+            }
             appleSyncError = r.warnings.isEmpty ? nil : r.warnings.joined(separator: "\n")
             if !r.warnings.isEmpty { SyncLog.write("apple: warnings \(r.warnings)") }
             // Reminders you added in the Reminders app → assignments (class and long-term setup work like quick add).
@@ -500,6 +539,80 @@ final class BrainStore: ObservableObject {
             appleSyncError = error.localizedDescription
             SyncLog.write("apple: error \(error)")
         }
+    }
+
+    // MARK: Homework that was saved as an event
+
+    /// One-time fix: quick add used to save things like "Study 1 hour for Stats" as a 1-hour event. Those become
+    /// assignments (due that day, with the time as the estimate), so they show on Today and can be logged.
+    func convertHomeworkEvents() {
+        guard !UserDefaults.standard.bool(forKey: "convertedHomeworkEvents") else { return }
+        UserDefaults.standard.set(true, forKey: "convertedHomeworkEvents")
+        let since = Calendar.current.startOfDay(for: Date()).addingTimeInterval(-14 * 86_400)
+        var moved = 0
+        for e in events where !e.recurrence.isRepeating && (e.location ?? "").isEmpty && e.start >= since
+            && NaturalLanguageParser.looksLikeAssignment(e.title) {
+            let p = parse(e.title)
+            let minutes = p.durationMinutes ?? (e.isAllDay ? 60 : max(15, Int(e.end.timeIntervalSince(e.start) / 60)))
+            let due = e.isAllDay ? Calendar.current.date(bySettingHour: 23, minute: 59, second: 0, of: e.start)! : e.end
+            let id = UUID.stable(from: "event-as-task:\(e.id.uuidString)")
+            if task(id) == nil {
+                upsert(BrainTask(id: id, title: p.title.isEmpty ? e.title : p.title, course: p.course ?? e.tag, notes: e.notes,
+                                 due: due, estimatedMinutes: minutes, estimateIsUserSet: true))
+            }
+            delete(e)
+            moved += 1
+        }
+        if moved > 0 { show("Moved \(moved) study block\(moved == 1 ? "" : "s") to Assignments") }
+    }
+
+    /// Once: chores and errands that older quick-add saved as calendar events ("Clean room") become to-dos.
+    /// Ids come from the event's, so the Mac and iPhone doing this at the same time can't make two.
+    func convertToDoEvents() {
+        guard !UserDefaults.standard.bool(forKey: "convertedToDoEvents") else { return }
+        UserDefaults.standard.set(true, forKey: "convertedToDoEvents")
+        let cal = Calendar.current
+        let today = cal.startOfDay(for: Date())
+        var moved: [String] = []
+        for e in events where (e.location ?? "").isEmpty && NaturalLanguageParser.looksLikeToDo(e.title, allDay: e.isAllDay) {
+            let upcoming = e.occurrences(in: DateInterval(start: today, duration: 60 * 86_400)).first?.start
+            guard e.end >= today.addingTimeInterval(-14 * 86_400) || upcoming != nil else { continue }
+            let day = e.recurrence.isRepeating ? (upcoming ?? e.start) : e.start
+            let due = e.isAllDay ? cal.date(bySettingHour: 23, minute: 59, second: 0, of: day)! : day
+            let id = UUID.stable(from: "event-as-todo:\(e.id.uuidString)")
+            if task(id) == nil, !hasOpenTask(titled: e.title) {
+                upsert(BrainTask(id: id, title: e.title, course: e.tag, notes: e.notes, due: due, estimatedMinutes: 30,
+                                 repeats: e.recurrence.isRepeating ? e.recurrence : nil))
+            }
+            delete(e)
+            moved.append(e.title)
+        }
+        if !moved.isEmpty { show("Moved \(moved.count) to-do\(moved.count == 1 ? "" : "s") off the calendar") }
+    }
+
+    private func hasOpenTask(titled title: String) -> Bool {
+        tasks.contains { !$0.isCompleted && $0.title.caseInsensitiveCompare(title) == .orderedSame }
+    }
+
+    // MARK: Duplicate events
+
+    /// The half-hourly pass (from the 90-second timer).
+    func cleanDuplicatesIfDue() async {
+        guard cleanDuplicateEvents, systemCalendar.authorized,
+              (lastDuplicateCleanup ?? .distantPast) < Date().addingTimeInterval(-30 * 60) else { return }
+        await syncApple()
+    }
+
+    /// Run the duplicate cleanup now instead of waiting for the next half hour.
+    func cleanDuplicatesNow() async {
+        forceDuplicateCleanup = true
+        await syncApple()
+    }
+
+    /// Put back events the cleanup removed.
+    func restoreDuplicates(_ items: [AppleSync.RemovedEvent]) async {
+        pendingRestore = items
+        await syncApple()
     }
 
     /// Gives each class its own color (first-seen order, so colors don't shuffle when you add a class).

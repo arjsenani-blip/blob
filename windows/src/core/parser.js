@@ -4,6 +4,10 @@
 const { startOfDay, addDays, at, weekdayOf } = require('./dates');
 
 const ASSIGNMENT = /\b(home ?work|hw|assignment|essay|worksheet|problem ?set|pset|practice (problems|questions|set|test)|lab (report|write ?up)|write ?up|project|reading|read (ch|chapter|pages|pp)|chapters?|paper|report|study ?guide|study for|review for|notes|outline|rough draft|final draft|draft|annotations?|exercises|packet|journal|reflection|flashcards|vocab (list|cards|words)|discussion post|turn in|submit|finish|complete|do (the|my)|frq|dbq|leq|saq|lab\b)/;
+// Errands and chores ("call mom tomorrow", "clean room sat") are to-dos even with a time.
+const CHORE = /^\s*(?:(?:i\s+)?(?:need to|have to|gotta|got to|should|must|remember to|don'?t forget to|pls|please)\s+)?(?:call|phone|text|email|e-mail|message|dm|reply( to)?|respond( to)?|follow up|ask|tell|remind|thank|buy|get|grab|pick up|drop off|order|return|exchange|pay|venmo|deposit|renew|sign|print|scan|mail|send|ship|book|reserve|schedule|reschedule|cancel|confirm|register|sign up|apply|fill out|clean|tidy|wash|vacuum|sweep|mop|dust|laundry|do (?:the |my )?(?:laundry|dishes|chores)|fold|iron|take out|empty|charge|fix|repair|pack|unpack|water|feed|walk (?:the )?dog|shop|groceries|grocery|refill|restock|cook|bake|make (?:my |the )?bed|organi[sz]e|sort|declutter|look up|research|google|download|install|update|upload|back up|backup|delete|unsubscribe|change|replace|set up|setup|bring|put away|find|check|memorize|prep|prepare|finish)\b(?!\s+(?:with|call|meeting)\b)/;
+// Things that are all-day events even with no time.
+const ALL_DAY_EVENT = /\b(birthday|bday|anniversary|holiday|vacation|break|day off|no school|half day|early release|graduation|wedding|funeral|trip|camp|festival|fair|convention|tournament|meet|game|recital|concert|show|competition|deadline|exam|test|quiz|midterm|finals?)\b/;
 const EVENT = /\b(practice|game|match|meet|meeting|appointment|appt|dentist|doctor|orthodontist|party|class|club|rehearsal|concert|recital|tryouts?|lesson|dinner|lunch|breakfast|movie|trip|flight|interview|tournament|session|test|exam|quiz|midterm|finals?(?!\s*draft)|ap exam|ceremony|assembly|conference|shift|work)\b/;
 const SUBJECTS = [
   [/\b(ap )?calc(ulus)?\b/, 'Calculus'], [/\b(pre-?calc|precalculus)\b/, 'Precalculus'], [/\b(math|algebra|geometry|stats|statistics)\b/, 'Math'],
@@ -292,7 +296,9 @@ class Parser {
     if (!day && time) day = at(today, time) > now ? today : addDays(today, 1);
 
     const assignmentByContext = looksLikeAssignment && !looksLikeEvent && !endTime && !repeating;
-    const isTask = forcedTask || assignmentByContext || (!day && !time && !repeating);
+    const choreByContext = CHORE.test(lowerInput) && !endTime && !(looksLikeEvent && /\bwith\b/.test(lowerInput));
+    const dayOnlyTask = !!day && !time && !location && !looksLikeEvent && !ALL_DAY_EVENT.test(lowerInput);
+    const isTask = forcedTask || assignmentByContext || choreByContext || dayOnlyTask || (!day && !time && !repeating);
     result.course = this.detectCourse(input);
     result.kind = isTask ? 'task' : 'event';
     result.hasExplicitTime = startTime != null;

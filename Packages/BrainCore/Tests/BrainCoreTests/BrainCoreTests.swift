@@ -486,3 +486,137 @@ final class RoutineTests: XCTestCase {
         XCTAssertEqual(SyncMerger.merge(a, b).routines.count, 2)
     }
 }
+
+final class StudyParsingTests: XCTestCase {
+    var cal: Calendar = {
+        var c = Calendar(identifier: .gregorian)
+        c.timeZone = TimeZone(identifier: "America/New_York")!
+        return c
+    }()
+    var now: Date { cal.date(from: DateComponents(year: 2026, month: 10, day: 28, hour: 11))! }
+    func parse(_ s: String) -> ParsedEntry { NaturalLanguageParser(calendar: cal, now: now).parse(s) }
+
+    func testStudyWithDurationIsAnAssignment() {
+        for text in ["Study 1 hour for Stats", "study 1.5 hours for chem today", "Study for math 2 hr", "studying 45 min for the bio quiz"] {
+            XCTAssertEqual(parse(text).kind, .task, text)
+        }
+        XCTAssertEqual(parse("Study 1 hour for Stats").durationMinutes, 60)
+        XCTAssertTrue(NaturalLanguageParser.looksLikeAssignment("Study 1 hour for Stats"))
+    }
+
+    func testStudyGroupIsStillAnEvent() {
+        XCTAssertEqual(parse("Study group sat 11-1pm").kind, .event)
+        XCTAssertFalse(NaturalLanguageParser.looksLikeAssignment("Study group"))
+        XCTAssertFalse(NaturalLanguageParser.looksLikeAssignment("Math test"))
+        XCTAssertFalse(NaturalLanguageParser.looksLikeAssignment("Tennis practice"))
+    }
+}
+
+final class ChoreParsingTests: XCTestCase {
+    var cal: Calendar = {
+        var c = Calendar(identifier: .gregorian)
+        c.timeZone = TimeZone(identifier: "America/New_York")!
+        return c
+    }()
+    var now: Date { cal.date(from: DateComponents(year: 2026, month: 10, day: 28, hour: 11))! }
+    func parse(_ s: String) -> ParsedEntry { NaturalLanguageParser(calendar: cal, now: now).parse(s) }
+
+    func testErrandsAndChoresAreToDos() {
+        for text in ["call mom tomorrow", "text Sam 5pm", "buy milk friday", "pick up dry cleaning thursday", "clean my room saturday",
+                     "do laundry tonight", "take out the trash tomorrow 7pm", "email Mr. Lee about the retake friday", "need to renew library card monday",
+                     "pay phone bill nov 3", "charge laptop tonight", "pick up Sam from practice 5pm", "schedule dentist appointment friday",
+                     "permission slip friday", "sign up for SAT tomorrow", "walk the dog 6pm"] {
+            XCTAssertEqual(parse(text).kind, .task, text)
+        }
+        let p = parse("call mom tomorrow 5pm")
+        XCTAssertEqual(p.start, cal.date(from: DateComponents(year: 2026, month: 10, day: 29, hour: 17)), "keeps the time as the reminder")
+    }
+
+    func testRealEventsStayEvents() {
+        for text in ["dinner with grandma friday 7pm", "mom's birthday friday", "no school monday", "math test friday", "dentist tomorrow 3pm",
+                     "zoom call with Ria 4-5pm", "debate tournament saturday", "fencing practice tue 6pm", "lunch with Sam at Chipotle thursday",
+                     "Halloween party saturday 8pm", "piano lesson every saturday 9am"] {
+            XCTAssertEqual(parse(text).kind, .event, text)
+        }
+    }
+
+    func testRepeatingChoresAreRepeatingToDos() {
+        let p = parse("take out trash every tuesday")
+        XCTAssertEqual(p.kind, .task)
+        XCTAssertEqual(p.recurrence.frequency, .weekly)
+        XCTAssertEqual(parse("Lumos summary + photo every tuesday").kind, .task)
+    }
+
+    func testSavedTitles() {
+        XCTAssertTrue(NaturalLanguageParser.looksLikeToDo("Clean room", allDay: true))
+        XCTAssertTrue(NaturalLanguageParser.looksLikeToDo("Sign up for Peach State", allDay: true))
+        XCTAssertTrue(NaturalLanguageParser.looksLikeToDo("Lumos Summary + Photo", allDay: true))
+        XCTAssertFalse(NaturalLanguageParser.looksLikeToDo("Mom's birthday", allDay: true))
+        XCTAssertFalse(NaturalLanguageParser.looksLikeToDo("Debate tournament", allDay: true))
+        XCTAssertFalse(NaturalLanguageParser.looksLikeToDo("Lumos Summary + Photo", allDay: false), "timed and not a chore: leave it")
+        XCTAssertFalse(NaturalLanguageParser.looksLikeToDo("Lunch with Sam", allDay: false))
+    }
+
+    func testNextOccurrenceOfARepeatingToDo() {
+        let due = cal.date(from: DateComponents(year: 2026, month: 10, day: 27, hour: 23, minute: 59))!  // a Tuesday
+        let t = BrainTask(title: "Trash", due: due, repeats: RecurrenceRule(frequency: .weekly))
+        let next = t.nextOccurrence(now: now, calendar: cal)
+        XCTAssertEqual(next?.due, cal.date(from: DateComponents(year: 2026, month: 11, day: 3, hour: 23, minute: 59)))
+        XCTAssertEqual(next?.repeats?.frequency, .weekly)
+        XCTAssertNotEqual(next?.id, t.id)
+        XCTAssertNil(BrainTask(title: "Once", due: due).nextOccurrence(now: now, calendar: cal))
+    }
+}
+
+final class DedupeTests: XCTestCase {
+    var cal: Calendar = {
+        var c = Calendar(identifier: .gregorian)
+        c.timeZone = TimeZone(identifier: "America/New_York")!
+        return c
+    }()
+    func at(_ d: Int, _ h: Int, _ m: Int = 0) -> Date { cal.date(from: DateComponents(year: 2026, month: 10, day: d, hour: h, minute: m))! }
+    func ev(_ id: String, _ title: String, _ s: Date, _ e: Date, allDay: Bool = false, mine: Bool = false, cal name: String = "Personal") -> EventOccurrence {
+        EventOccurrence(id: id, eventID: mine ? UUID() : nil, title: title, start: s, end: e, isAllDay: allDay, externalCalendar: name)
+    }
+
+    func testTitles() {
+        XCTAssertTrue(EventDeduper.similarTitle("Daylight Saving Time ends", "Daylight Saving Time End"))
+        XCTAssertTrue(EventDeduper.similarTitle("🎃 Halloween", "Halloween"))
+        XCTAssertTrue(EventDeduper.similarTitle("Due: Study for Chem", "Study for chem"))
+        XCTAssertTrue(EventDeduper.similarTitle("Club Fencing", "club fencing!"))
+        XCTAssertFalse(EventDeduper.similarTitle("Math test", "Math test review"))
+        XCTAssertFalse(EventDeduper.similarTitle("Lumos-Acton", "Acton Beginner Debate Club"))
+        XCTAssertFalse(EventDeduper.similarTitle("Lunch", "Lunch with Ralf"))
+        XCTAssertTrue(EventDeduper.sameTitle("Columbus Day", "columbus day"))
+        XCTAssertFalse(EventDeduper.sameTitle("Daylight Saving Time ends", "Daylight Saving Time begins"))
+    }
+
+    func testShowsOneOfEach() {
+        let day = at(31, 0)
+        let items = [
+            ev("a", "Halloween", day, day.addingTimeInterval(86_400), allDay: true, cal: "US Holidays"),
+            ev("b", "Halloween", day, day.addingTimeInterval(86_400), allDay: true, cal: "Holidays in United States"),
+            ev("c", "Club Fencing", at(28, 18, 30), at(28, 20)),
+            ev("d", "Club Fencing", at(28, 18, 30), at(28, 20), cal: "arjsenani@gmail.com"),
+            ev("e", "Acton Beginner Debate", at(28, 17), at(28, 18)),
+            ev("f", "Lumos-Acton", at(28, 17), at(28, 18)),
+            ev("g", "Private Lesson with Ralf", at(28, 20), at(28, 21)),
+            ev("h", "Private Lesson with Ralf", at(29, 20), at(29, 21)),   // next day: a different occurrence
+        ]
+        let out = EventDeduper.dedupe(items, calendar: cal)
+        XCTAssertEqual(out.map(\.id), ["a", "c", "e", "f", "g", "h"])
+    }
+
+    func testPrefersBlobsOwnEvent() {
+        let out = EventDeduper.dedupe([ev("x", "Tennis", at(27, 15), at(27, 17)), ev("y", "Tennis", at(27, 15), at(27, 17), mine: true)], calendar: cal)
+        XCTAssertEqual(out.map(\.id), ["y"])
+    }
+
+    func testExactCopyIsStrict() {
+        XCTAssertTrue(EventDeduper.isExactCopy(title: "Club Fencing", start: at(28, 18, 30), end: at(28, 20), allDay: false,
+                                               title: "club fencing", start: at(28, 18, 30), end: at(28, 20), allDay: false, calendar: cal))
+        // 5 minutes apart: shown once, but never deleted.
+        XCTAssertFalse(EventDeduper.isExactCopy(title: "Club Fencing", start: at(28, 18, 30), end: at(28, 20), allDay: false,
+                                                title: "Club Fencing", start: at(28, 18, 35), end: at(28, 20), allDay: false, calendar: cal))
+    }
+}

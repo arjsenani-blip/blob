@@ -38,6 +38,27 @@ actor AppleSync {
         var dueCalendar: String? = nil
         /// Which lists/calendars were used last time (so items can be moved when you switch).
         var state: [String: String] = [:]
+        /// Remove exact duplicate copies of events from your calendars this run.
+        var cleanDuplicates = false
+        /// Put back events an earlier cleanup removed.
+        var restore: [RemovedEvent] = []
+    }
+
+    /// An event the duplicate cleanup removed — everything needed to put it back.
+    struct RemovedEvent: Codable, Hashable, Identifiable {
+        var id: String
+        var title: String
+        var start: Date
+        var end: Date
+        var isAllDay: Bool
+        var location: String?
+        var notes: String?
+        var url: String?
+        var calendarID: String
+        var calendarTitle: String
+        /// Where the copy that stayed lives.
+        var keptIn: String
+        var removedAt: Date
     }
 
     /// A reminder you added in the Reminders app, to become a Blob assignment.
@@ -63,6 +84,8 @@ actor AppleSync {
         var warnings: [String] = []
         var eventsChanged: [BrainEvent] = []
         var imported: [ImportedReminder] = []
+        var removedDuplicates: [RemovedEvent] = []
+        var restored = 0
     }
 
     nonisolated var isRecentOwnWrite: Bool { Date().timeIntervalSince(lastOwnWrite) < 3 }
@@ -110,6 +133,14 @@ actor AppleSync {
                 }
             }
         }
+        if EKEventStore.authorizationStatus(for: .event) == .fullAccess {
+            if !options.restore.isEmpty {
+                await part("Putting events back") { result.restored = try restore(options.restore) }
+            }
+            if options.cleanDuplicates {
+                await part("Duplicate cleanup") { result.removedDuplicates = try removeDuplicateEvents() }
+            }
+        }
         if dirty {
             lastOwnWrite = Date()
             try ek.commit()
@@ -117,6 +148,79 @@ actor AppleSync {
         }
         result.state = state
         return result
+    }
+
+    // MARK: Duplicate cleanup
+
+    /// Removes exact copies of the same event from your calendars: same title (ignoring case, punctuation, emoji) at the
+    /// same time, in calendars you can edit. Never touches: invitations (deleting one could send a decline), repeating
+    /// events, read-only/subscribed/holiday calendars, or Blob's own items. Keeps the oldest copy.
+    private func removeDuplicateEvents() throws -> [RemovedEvent] {
+        let now = Date()
+        let calendars = ek.calendars(for: .event).filter {
+            $0.allowsContentModifications && !$0.isSubscribed && $0.type != .birthday && !$0.isImmutable
+        }
+        guard calendars.count > 0 else { return [] }
+        let range = (now.addingTimeInterval(-14 * 86_400), now.addingTimeInterval(180 * 86_400))
+        let events = ek.events(matching: ek.predicateForEvents(withStart: range.0, end: range.1, calendars: calendars)).filter { e in
+            !e.hasRecurrenceRules && !e.hasAttendees && !e.isDetached
+                && !(e.url?.absoluteString.hasPrefix("blob://") ?? false)
+                && !(e.title ?? "").trimmingCharacters(in: .whitespaces).isEmpty
+        }
+        // Group by day first so the pairwise check stays small.
+        var byDay: [Date: [EKEvent]] = [:]
+        for e in events { byDay[Calendar.current.startOfDay(for: e.startDate), default: []].append(e) }
+        var removed: [RemovedEvent] = []
+        var gone = Set<String>()
+        for (_, dayEvents) in byDay {
+            let sorted = dayEvents.sorted { ($0.creationDate ?? .distantFuture) < ($1.creationDate ?? .distantFuture) }
+            for (i, keep) in sorted.enumerated() where !gone.contains(keep.calendarItemIdentifier) {
+                for copy in sorted[(i + 1)...] where !gone.contains(copy.calendarItemIdentifier) {
+                    guard EventDeduper.isExactCopy(title: keep.title ?? "", start: keep.startDate, end: keep.endDate, allDay: keep.isAllDay,
+                                                   title: copy.title ?? "", start: copy.startDate, end: copy.endDate, allDay: copy.isAllDay)
+                    else { continue }
+                    removed.append(RemovedEvent(id: copy.calendarItemIdentifier, title: copy.title ?? "", start: copy.startDate, end: copy.endDate,
+                                                isAllDay: copy.isAllDay, location: copy.location, notes: copy.notes, url: copy.url?.absoluteString,
+                                                calendarID: copy.calendar.calendarIdentifier, calendarTitle: copy.calendar.title,
+                                                keptIn: keep.calendar.title, removedAt: now))
+                    gone.insert(copy.calendarItemIdentifier)
+                }
+            }
+        }
+        // Something looks off if a run would remove a lot — leave everything alone and say so.
+        guard removed.count <= 40 else {
+            throw NSError(domain: "Blob", code: 1, userInfo: [NSLocalizedDescriptionKey:
+                "Found \(removed.count) possible duplicates — more than Blob removes on its own. Nothing was removed."])
+        }
+        var done: [RemovedEvent] = []
+        for r in removed {
+            guard let e = ek.calendarItem(withIdentifier: r.id) as? EKEvent else { continue }
+            try ek.remove(e, span: .thisEvent, commit: false)
+            dirty = true
+            done.append(r)
+        }
+        return done
+    }
+
+    /// Puts removed events back in their calendars (or your default calendar if that one is gone).
+    private func restore(_ items: [RemovedEvent]) throws -> Int {
+        var n = 0
+        for r in items {
+            guard let cal = ek.calendar(withIdentifier: r.calendarID) ?? ek.defaultCalendarForNewEvents, cal.allowsContentModifications else { continue }
+            let e = EKEvent(eventStore: ek)
+            e.calendar = cal
+            e.title = r.title
+            e.startDate = r.start
+            e.endDate = r.end
+            e.isAllDay = r.isAllDay
+            e.location = r.location
+            e.notes = r.notes
+            e.url = r.url.flatMap(URL.init(string:))
+            try ek.save(e, span: .thisEvent, commit: false)
+            dirty = true
+            n += 1
+        }
+        return n
     }
 
     // MARK: Lists / calendars

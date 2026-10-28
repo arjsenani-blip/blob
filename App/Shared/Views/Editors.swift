@@ -96,6 +96,10 @@ struct TaskEditor: View {
                         set: { task.due = $0 ? Calendar.current.date(bySettingHour: 23, minute: 59, second: 0, of: Date()) : nil }))
                     if task.due != nil {
                         DatePicker("Due", selection: Binding($task.due, default: Date()))
+                        Picker("Repeat", selection: Binding(get: { task.repeats?.frequency ?? .none },
+                                                            set: { task.repeats = $0 == .none ? nil : RecurrenceRule(frequency: $0) })) {
+                            ForEach(RecurrenceRule.Frequency.allCases) { Text($0.label).tag($0) }
+                        }
                     }
                 }
                 Section {
@@ -140,6 +144,7 @@ struct TaskEditor: View {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Save") {
                         if task.isCompleted && task.completedAt == nil { task.completedAt = Date() }
+                        if task.isCompleted, store.task(task.id)?.isCompleted == false { store.handOffRepeat(&task) }
                         store.upsert(task)
                         dismiss()
                     }

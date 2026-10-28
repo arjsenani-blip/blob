@@ -214,6 +214,8 @@ public struct BrainTask: SyncRecord, Hashable {
     /// Classroom's submission state: NEW, CREATED, TURNED_IN, RETURNED, RECLAIMED_BY_STUDENT.
     public var submissionState: String?
     public var isLate: Bool
+    /// A to-do that comes back ("take out trash every tuesday"): checking it off adds the next one.
+    public var repeats: RecurrenceRule?
     public var updatedAt: Date
     public var deleted: Bool
 
@@ -224,7 +226,7 @@ public struct BrainTask: SyncRecord, Hashable {
                 estimateIsUserSet: Bool = false, startDate: Date? = nil, createdAt: Date? = Date(),
                 milestones: [Milestone] = [], sessions: [WorkSession] = [], pointsEarned: Double? = nil,
                 maxPoints: Double? = nil, submissionState: String? = nil, isLate: Bool = false,
-                updatedAt: Date = Date(), deleted: Bool = false) {
+                repeats: RecurrenceRule? = nil, updatedAt: Date = Date(), deleted: Bool = false) {
         self.id = id
         self.title = title
         self.course = course
@@ -248,6 +250,7 @@ public struct BrainTask: SyncRecord, Hashable {
         self.maxPoints = maxPoints
         self.submissionState = submissionState
         self.isLate = isLate
+        self.repeats = repeats
         self.updatedAt = updatedAt
         self.deleted = deleted
     }
@@ -277,8 +280,34 @@ public struct BrainTask: SyncRecord, Hashable {
         maxPoints = try c.decodeIfPresent(Double.self, forKey: .maxPoints)
         submissionState = try c.decodeIfPresent(String.self, forKey: .submissionState)
         isLate = try c.decodeIfPresent(Bool.self, forKey: .isLate) ?? false
+        repeats = try c.decodeIfPresent(RecurrenceRule.self, forKey: .repeats)
         updatedAt = try c.decodeIfPresent(Date.self, forKey: .updatedAt) ?? .distantPast
         deleted = try c.decodeIfPresent(Bool.self, forKey: .deleted) ?? false
+    }
+}
+
+extension BrainTask {
+    /// The next copy of a repeating to-do, due on the rule's next day after this one (and not in the past).
+    public func nextOccurrence(now: Date = Date(), calendar: Calendar = .current) -> BrainTask? {
+        guard let rule = repeats, rule.isRepeating, let due else { return nil }
+        let floor = max(calendar.startOfDay(for: due), calendar.startOfDay(for: now))
+        let dueWeekday = calendar.component(.weekday, from: due)
+        let dueDay = calendar.component(.day, from: due)
+        let time = calendar.dateComponents([.hour, .minute], from: due)
+        guard let next = (1...400).lazy.compactMap({ calendar.date(byAdding: .day, value: $0, to: floor) }).first(where: { d in
+            let wd = calendar.component(.weekday, from: d)
+            switch rule.frequency {
+            case .daily: return true
+            case .weekdays: return (2...6).contains(wd)
+            case .weekly: return rule.weekdays.isEmpty ? wd == dueWeekday : rule.weekdays.contains(wd)
+            case .monthly: return calendar.component(.day, from: d) == dueDay
+            case .none: return false
+            }
+        }) else { return nil }
+        if let until = rule.until, next > until { return nil }
+        let nextDue = calendar.date(bySettingHour: time.hour ?? 23, minute: time.minute ?? 59, second: 0, of: next)
+        return BrainTask(title: title, course: course, notes: notes, due: nextDue, estimatedMinutes: estimatedMinutes,
+                         difficulty: difficulty, priority: priority, estimateIsUserSet: estimateIsUserSet, repeats: rule)
     }
 }
 

@@ -105,3 +105,10 @@ test('known courses from Classroom', () => {
   assert.strictEqual(p.kind, 'task'); assert.strictEqual(p.course, 'AP Language & Composition (P2)');
   assert.strictEqual(parse('calc problem set tomorrow', ['AP Calculus BC']).course, 'AP Calculus BC');
 });
+
+test('errands and chores are to-dos; real events stay events', () => {
+  for (const t of ['call mom tomorrow', 'buy milk friday', 'clean my room saturday', 'take out the trash tomorrow 7pm', 'pick up Sam from practice 5pm', 'permission slip friday'])
+    assert.equal(parse(t).kind, 'task', t);
+  for (const t of ['dinner with grandma friday 7pm', "mom's birthday friday", 'math test friday', 'zoom call with Ria 4-5pm', 'debate tournament saturday'])
+    assert.equal(parse(t).kind, 'event', t);
+});

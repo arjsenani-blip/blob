@@ -327,6 +327,7 @@ private struct AppleCalendarSection: View {
             if (store.useAppleCalendar || store.appleEventsOn) && !systemCalendar.authorized {
                 Text("Allow calendar access in System Settings → Privacy & Security → Calendars.").font(.caption).foregroundStyle(.orange)
             }
+            DuplicateCleanupRows(systemCalendar: systemCalendar)
             if let err = store.appleSyncError { Text(err).font(.caption).foregroundStyle(.red) }
         } header: {
             Text("Calendars & Reminders")
@@ -639,5 +640,59 @@ private struct GoogleG: View {
             .frame(width: 28, height: 28)
             .background(Brand.card, in: Circle())
             .overlay(Circle().strokeBorder(Brand.hairline))
+    }
+}
+
+/// Duplicate events: Blob always shows one of each; this also removes exact copies from your calendars, with undo.
+private struct DuplicateCleanupRows: View {
+    @EnvironmentObject var store: BrainStore
+    @ObservedObject var systemCalendar: SystemCalendarBridge
+    @State private var working = false
+    @State private var showRemoved = false
+
+    var body: some View {
+        Toggle("Clean up duplicate events automatically", isOn: Binding(
+            get: { store.cleanDuplicateEvents },
+            set: { on in store.cleanDuplicateEvents = on; if on { run { await store.cleanDuplicatesNow() } } }))
+        if store.cleanDuplicateEvents {
+            HStack {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(store.lastDuplicateCleanup.map { "Checked \($0.formatted(.relative(presentation: .named)))" } ?? "Not checked yet")
+                    Text("Every 30 minutes. Exact copies only — same title at the same time. Holiday calendars, invitations and repeating events are never touched.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+                Spacer()
+                if working { ProgressView().controlSize(.small) }
+                Button("Check now") { run { await store.cleanDuplicatesNow() } }
+                    .buttonStyle(TintButtonStyle(kind: .glass, compact: true))
+                    .disabled(working || !systemCalendar.authorized)
+            }
+        }
+        if !store.removedDuplicates.isEmpty {
+            DisclosureGroup("Removed lately (\(store.removedDuplicates.count))", isExpanded: $showRemoved) {
+                ForEach(store.removedDuplicates.prefix(30)) { r in
+                    HStack {
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text(r.title).lineLimit(1)
+                            Text("\(r.isAllDay ? r.start.formatted(date: .abbreviated, time: .omitted) : r.start.formatted(date: .abbreviated, time: .shortened)) · from \(r.calendarTitle), kept in \(r.keptIn)")
+                                .font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                        }
+                        Spacer()
+                        Button("Put back") { run { await store.restoreDuplicates([r]) } }
+                            .buttonStyle(TintButtonStyle(kind: .quiet, compact: true)).disabled(working)
+                    }
+                }
+                Button("Put all \(store.removedDuplicates.count) back") { run { await store.restoreDuplicates(store.removedDuplicates) } }
+                    .disabled(working)
+            }
+        }
+        if !systemCalendar.authorized && store.cleanDuplicateEvents {
+            Text("Duplicate cleanup needs calendar access.").font(.caption).foregroundStyle(.orange)
+        }
+    }
+
+    private func run(_ work: @escaping () async -> Void) {
+        working = true
+        Task { await work(); working = false }
     }
 }
