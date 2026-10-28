@@ -302,3 +302,15 @@ func xRich(_ s: String, size: CGFloat = 17) -> AttributedString {
     }
     return a
 }
+
+extension View {
+    /// Minimum sheet size on the Mac; on the iPhone a sheet always fits the screen.
+    @ViewBuilder
+    func sheetSize(minWidth: CGFloat, minHeight: CGFloat? = nil) -> some View {
+        #if os(macOS)
+        frame(minWidth: minWidth, minHeight: minHeight)
+        #else
+        self
+        #endif
+    }
+}

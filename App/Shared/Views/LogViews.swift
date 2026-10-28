@@ -212,7 +212,7 @@ struct LogSheet: View {
             .navigationTitle("Log work")
             .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Close") { dismiss() } } }
         }
-        .frame(minWidth: 560, minHeight: 460)
+        .sheetSize(minWidth: 560, minHeight: 460)
     }
 }
 

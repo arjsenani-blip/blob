@@ -71,7 +71,7 @@ struct EventEditor: View {
                 }
             }
         }
-        .frame(minWidth: 460, minHeight: 520)
+        .sheetSize(minWidth: 460, minHeight: 520)
     }
 }
 
@@ -147,7 +147,7 @@ struct TaskEditor: View {
                 }
             }
         }
-        .frame(minWidth: 460, minHeight: 560)
+        .sheetSize(minWidth: 460, minHeight: 560)
     }
 }
 

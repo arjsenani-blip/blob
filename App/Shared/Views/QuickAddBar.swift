@@ -169,7 +169,7 @@ struct QuickAddSheet: View {
                 .foregroundStyle(.secondary)
         }
         .padding(20)
-        .frame(minWidth: 520)
+        .sheetSize(minWidth: 520)
         .background(FrameBackground())
     }
 }

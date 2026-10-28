@@ -189,7 +189,7 @@ struct TaskPicker: View {
             .navigationTitle("Focus on…")
             .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } } }
         }
-        .frame(minWidth: 420, minHeight: 480)
+        .sheetSize(minWidth: 420, minHeight: 480)
     }
 }
 

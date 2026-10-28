@@ -96,7 +96,7 @@ struct RootView: View {
                     .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { showSettings = false } } }
             }
             .environmentObject(store)
-            .frame(minWidth: 620, minHeight: 700)
+            .sheetSize(minWidth: 620, minHeight: 700)
         }
         .sheet(isPresented: $showSearch) { SearchSheet().environmentObject(store) }
         .overlay(alignment: .top) {
@@ -191,7 +191,7 @@ struct SearchSheet: View {
             .navigationTitle("Search")
             .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Close") { dismiss() } } }
         }
-        .frame(minWidth: 520, minHeight: 560)
+        .sheetSize(minWidth: 520, minHeight: 560)
         .sheet(item: $openTask) { AssignmentDetail(taskID: $0.id).environmentObject(store) }
     }
 }

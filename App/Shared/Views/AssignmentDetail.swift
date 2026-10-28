@@ -103,7 +103,7 @@ struct AssignmentDetail: View {
                 Text("This assignment was deleted.").foregroundStyle(.secondary).padding()
             }
         }
-        .frame(minWidth: 520, minHeight: 640)
+        .sheetSize(minWidth: 520, minHeight: 640)
     }
 
     // MARK: Sections

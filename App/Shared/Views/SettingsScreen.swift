@@ -218,7 +218,7 @@ private struct SetupHelp: View {
             .navigationTitle("Google setup")
             .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
         }
-        .frame(minWidth: 480, minHeight: 520)
+        .sheetSize(minWidth: 480, minHeight: 520)
     }
 
     private func step(_ n: Int, _ text: LocalizedStringKey) -> some View {
