@@ -8,7 +8,7 @@ struct ArjunsBrainApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     #endif
     @Environment(\.scenePhase) private var scenePhase
-    @AppStorage("accent") private var accent = AccentChoice.cyan.rawValue
+    @AppStorage("accent") private var accent = AccentChoice.violet.rawValue
 
     private var mainWindow: some Scene {
         WindowGroup("Blob") {

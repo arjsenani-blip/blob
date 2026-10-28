@@ -13,8 +13,13 @@ enum X {
     static let page = Color(adaptive: (1, 1, 1), dark: (0.055, 0.055, 0.067))
     static let raised = Color(adaptive: (1, 1, 1), dark: (0.11, 0.11, 0.13))
     static let soft = Color(adaptive: (0.949, 0.945, 0.965), dark: (0.15, 0.15, 0.18))
-    static let purple = Color(adaptive: (0.482, 0.247, 0.969), dark: (0.62, 0.45, 1.0))
-    static let purpleSoft = Color(adaptive: (0.949, 0.933, 0.988), dark: (0.20, 0.16, 0.30))
+    /// The accent (purple unless you pick another in Settings).
+    static var purple: Color {
+        AccentChoice.current == .violet ? Color(adaptive: (0.482, 0.247, 0.969), dark: (0.62, 0.45, 1.0)) : AccentChoice.current.color
+    }
+    static var purpleSoft: Color {
+        AccentChoice.current == .violet ? Color(adaptive: (0.949, 0.933, 0.988), dark: (0.20, 0.16, 0.30)) : AccentChoice.current.color.opacity(0.14)
+    }
     static let now = Color(red: 0.898, green: 0.282, blue: 0.302)
 
     /// The pastel section labels and their tiles.

@@ -16,7 +16,7 @@ struct SettingsScreen: View {
                 TextField("Your name", text: $store.displayName)
                 AccentPicker()
             } header: { Text("You") } footer: {
-                Text("The accent tints the whole app — buttons, glass, the glow behind cards.")
+                Text("The accent colors the main buttons, the + button, the focus timer and highlights.")
             }
 
             TickTickSection()
@@ -516,27 +516,30 @@ private struct TickTickHelp: View {
 }
 #endif
 
-/// Cooky's swatches: pick the one accent that tints the app.
+/// Pick the one accent that tints the app.
 private struct AccentPicker: View {
-    @AppStorage("accent") private var accent = AccentChoice.cyan.rawValue
+    @AppStorage("accent") private var accent = AccentChoice.violet.rawValue
     var body: some View {
-        HStack(spacing: 10) {
-            Text("Accent")
-            Spacer()
-            ForEach(AccentChoice.allCases) { c in
-                let on = accent == c.rawValue
-                Button { accent = c.rawValue } label: {
-                    Circle().fill(c.color)
-                        .frame(width: 22, height: 22)
-                        .overlay { if on { Image(systemName: "checkmark").font(.caption2.weight(.heavy)).foregroundStyle(.white) } }
-                        .overlay(Circle().strokeBorder(.black.opacity(0.12)))
-                        .padding(3)
-                        .overlay(Circle().strokeBorder(on ? Brand.inkStrong : .clear, lineWidth: 2))
-                        .shadow(color: c.color.opacity(0.5), radius: 4, y: 2)
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Accent color")
+            HStack(spacing: 8) {
+                ForEach(AccentChoice.allCases) { c in
+                    let on = accent == c.rawValue
+                    Button { accent = c.rawValue } label: {
+                        Circle().fill(c.color)
+                            .frame(width: 26, height: 26)
+                            .overlay { if on { Image(systemName: "checkmark").font(.caption.weight(.heavy)).foregroundStyle(.white) } }
+                            .padding(3)
+                            .overlay(Circle().strokeBorder(on ? Brand.inkStrong : .clear, lineWidth: 2))
+                            .frame(maxWidth: .infinity)
+                            .contentShape(Circle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(c.name + (on ? ", selected" : ""))
+                    .help(c.name)
                 }
-                .buttonStyle(.plain)
-                .help(c.name)
             }
         }
+        .padding(.vertical, 4)
     }
 }

@@ -1,11 +1,9 @@
 import SwiftUI
 import BrainCore
 
-// Blob's look follows the Cooky design language (the same one MediBro/ReadRx uses):
-// - the window is a *frame*: a cool, softly lit gradient with a slow-drifting field of color;
-// - content sits on *floating cards*: rounded, layered shadow, a faint colored bloom underneath;
-// - controls are *tinted glass*: a wash of the accent, a thin inner ring, a soft glow — never a solid slab;
-// - one accent drives everything, and accent-colored text always uses a deeper, legible shade.
+// Blob's look (borrowed from the Extra email app): white and airy, black type, cards with a thin line and a soft
+// shadow, one accent (purple by default) for the main action, and pastel tints for labels. The calendar-first
+// screens use the X tokens; these Brand pieces are the same look for the older screens.
 
 // MARK: - Accent
 
@@ -18,7 +16,7 @@ enum AccentChoice: String, CaseIterable, Identifiable {
         switch self {
         case .cyan: return (34, 211, 238)
         case .blue: return (59, 130, 246)
-        case .violet: return (139, 92, 246)
+        case .violet: return (123, 63, 247)
         case .pink: return (236, 72, 153)
         case .red: return (239, 68, 68)
         case .orange: return (249, 115, 22)
@@ -29,7 +27,7 @@ enum AccentChoice: String, CaseIterable, Identifiable {
     var color: Color { Color(red: rgb.0 / 255, green: rgb.1 / 255, blue: rgb.2 / 255) }
 
     static var current: AccentChoice {
-        AccentChoice(rawValue: UserDefaults.standard.string(forKey: "accent") ?? "") ?? .cyan
+        AccentChoice(rawValue: UserDefaults.standard.string(forKey: "accent") ?? "") ?? .violet
     }
 }
 
@@ -45,8 +43,7 @@ enum Brand {
 
     /// The fluid brand gradient (Cooky's orb): accent → blue → violet.
     static var gradient: LinearGradient {
-        LinearGradient(colors: [accent, Color(red: 0.23, green: 0.51, blue: 0.96), Color(red: 0.55, green: 0.36, blue: 0.96)],
-                       startPoint: .topLeading, endPoint: .bottomTrailing)
+        LinearGradient(colors: [accent, accent], startPoint: .topLeading, endPoint: .bottomTrailing)
     }
 
     // Fixed meaning colors (never the accent): match, caution, stop.
@@ -83,16 +80,17 @@ enum Brand {
     }
 
     // Neutrals (Cooky light / dark).
-    static let ink = Color(adaptive: (0.075, 0.129, 0.169), dark: (0.914, 0.949, 0.961))
-    static let inkStrong = Color(adaptive: (0.031, 0.075, 0.102), dark: (1, 1, 1))
-    static let muted = Color(adaptive: (0.243, 0.310, 0.353), dark: (0.765, 0.816, 0.843))
-    static let faint = Color(adaptive: (0.353, 0.420, 0.463), dark: (0.58, 0.647, 0.69))
-    static let card = Color(adaptive: (0.984, 0.992, 0.996), dark: (0.078, 0.094, 0.125))
-    static let paper = Color(adaptive: (1, 1, 1), dark: (0.106, 0.129, 0.169))
-    static let surface = Color(adaptive: (0.929, 0.957, 0.969), dark: (0.102, 0.125, 0.165))
-    static let hairline = Color(adaptive: (0.075, 0.129, 0.169), dark: (0.914, 0.949, 0.961)).opacity(0.08)
-    /// Plain window color, for places the frame doesn't reach (sheets, forms).
-    static let canvas = Color(adaptive: (0.953, 0.98, 0.988), dark: (0.047, 0.063, 0.086))
+    // Neutrals — the same clean set as the calendar-first screens (X).
+    static let ink = Color(adaptive: (0.067, 0.067, 0.078), dark: (0.96, 0.96, 0.97))
+    static let inkStrong = Color(adaptive: (0.04, 0.04, 0.05), dark: (1, 1, 1))
+    static let muted = Color(adaptive: (0.373, 0.373, 0.420), dark: (0.66, 0.66, 0.71))
+    static let faint = Color(adaptive: (0.42, 0.42, 0.47), dark: (0.58, 0.58, 0.63))
+    static let card = Color(adaptive: (1, 1, 1), dark: (0.11, 0.11, 0.13))
+    static let paper = Color(adaptive: (1, 1, 1), dark: (0.13, 0.13, 0.15))
+    static let surface = Color(adaptive: (0.949, 0.945, 0.965), dark: (0.15, 0.15, 0.18))
+    static let hairline = Color(adaptive: (0.933, 0.925, 0.949), dark: (0.17, 0.17, 0.20))
+    /// Plain window color.
+    static let canvas = Color(adaptive: (1, 1, 1), dark: (0.055, 0.055, 0.067))
 }
 
 extension Color {
@@ -149,43 +147,7 @@ extension Color {
 
 /// The window background: Cooky's cool gradient plus a slowly drifting mesh of the accent, blue, violet and pink.
 struct FrameBackground: View {
-    @Environment(\.colorScheme) private var scheme
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @State private var drift = false
-
-    var body: some View {
-        let dark = scheme == .dark
-        GeometryReader { g in
-            ZStack {
-                LinearGradient(colors: dark ? [Color(hex: "#0c1016")!, Color(hex: "#0f141b")!, Color(hex: "#101922")!]
-                                            : [Color(hex: "#f3fafc")!, Color(hex: "#ecf6f9")!, Color(hex: "#e3f0f5")!],
-                               startPoint: .topLeading, endPoint: .bottomTrailing)
-                ZStack {
-                    blob(Brand.accent.opacity(dark ? 0.22 : 0.30), at: CGPoint(x: 0.18, y: 0.22), size: 0.48, in: g.size)
-                    blob(Color(red: 0.38, green: 0.65, blue: 0.98).opacity(dark ? 0.18 : 0.22), at: CGPoint(x: 0.82, y: 0.26), size: 0.44, in: g.size)
-                    blob(Color(red: 0.66, green: 0.33, blue: 0.97).opacity(dark ? 0.16 : 0.16), at: CGPoint(x: 0.62, y: 0.86), size: 0.5, in: g.size)
-                    blob(Color(red: 0.96, green: 0.45, blue: 0.71).opacity(dark ? 0.10 : 0.12), at: CGPoint(x: 0.12, y: 0.88), size: 0.4, in: g.size)
-                }
-                .scaleEffect(drift ? 1.1 : 1)
-                .rotationEffect(.degrees(drift ? 8 : 0))
-                .offset(x: drift ? g.size.width * 0.04 : 0, y: drift ? -g.size.height * 0.03 : 0)
-            }
-        }
-        .ignoresSafeArea()
-        .allowsHitTesting(false)
-        .onAppear {
-            guard !reduceMotion else { return }
-            withAnimation(.easeInOut(duration: 32).repeatForever(autoreverses: true)) { drift = true }
-        }
-    }
-
-    private func blob(_ color: Color, at p: CGPoint, size: CGFloat, in s: CGSize) -> some View {
-        let d = max(s.width, s.height) * size
-        return Circle()
-            .fill(RadialGradient(colors: [color, color.opacity(0)], center: .center, startRadius: 0, endRadius: d / 2))
-            .frame(width: d, height: d)
-            .position(x: s.width * p.x, y: s.height * p.y)
-    }
+    var body: some View { Brand.canvas.ignoresSafeArea().allowsHitTesting(false) }
 }
 
 // MARK: - Floating cards
@@ -197,14 +159,9 @@ struct CardModifier: ViewModifier {
         content
             .padding(padding)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background {
-                RoundedRectangle(cornerRadius: 20, style: .continuous)
-                    .fill(Brand.card)
-                    .shadow(color: .black.opacity(0.05), radius: 1, y: 1)
-                    .shadow(color: .black.opacity(0.10), radius: 16, y: 10)
-                    .shadow(color: bloom ? Brand.accent.opacity(0.16) : .clear, radius: 36, y: 22)
-            }
+            .background(Brand.card, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
             .overlay(RoundedRectangle(cornerRadius: 20, style: .continuous).strokeBorder(Brand.hairline))
+            .shadow(color: .black.opacity(0.05), radius: 14, y: 7)
     }
 }
 
@@ -217,7 +174,6 @@ extension View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(Brand.paper, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
             .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(Brand.hairline))
-            .shadow(color: .black.opacity(0.05), radius: 3, y: 2)
     }
 }
 
@@ -245,39 +201,24 @@ struct TintButtonStyle: ButtonStyle {
         @State private var hover = false
 
         var body: some View {
-            let shape = RoundedRectangle(cornerRadius: compact ? 10 : 14, style: .continuous)
+            let shape = Capsule()
             configuration.label
                 .font((compact ? Font.subheadline : .body).weight(.semibold))
-                .foregroundStyle(kind == .quiet ? Brand.ink : tint.legible)
-                .padding(.horizontal, compact ? 10 : 16)
+                .foregroundStyle(kind == .primary ? Color.white : Brand.ink)
+                .padding(.horizontal, compact ? 12 : 18)
                 .padding(.vertical, compact ? 6 : 11)
                 .frame(maxWidth: fullWidth ? .infinity : nil)
                 .background {
                     switch kind {
-                    case .primary:
-                        shape.fill(Brand.card)
-                        shape.fill(LinearGradient(colors: [tint.opacity(configuration.isPressed ? 0.34 : 0.22), tint.opacity(configuration.isPressed ? 0.46 : 0.34)],
-                                                  startPoint: .top, endPoint: .bottom))
-                    case .glass:
-                        shape.fill(Brand.card)
-                        shape.fill(LinearGradient(colors: [.white.opacity(0.5), tint.opacity(hover || configuration.isPressed ? 0.2 : 0.08)],
-                                                  startPoint: .top, endPoint: .bottom))
-                    case .quiet:
-                        shape.fill(Brand.paper)
+                    case .primary: shape.fill(tint.opacity(configuration.isPressed ? 0.85 : 1))
+                    case .glass: shape.fill(hover || configuration.isPressed ? Brand.surface : Brand.card)
+                    case .quiet: shape.fill(Brand.surface)
                     }
                 }
-                .overlay {
-                    switch kind {
-                    case .primary: shape.strokeBorder(tint.opacity(0.65), lineWidth: 1.5)
-                    case .glass: shape.strokeBorder(tint.opacity(hover ? 0.6 : 0.42), lineWidth: 1)
-                    case .quiet: shape.strokeBorder(Brand.hairline, lineWidth: 1)
-                    }
-                }
-                .shadow(color: kind == .primary || hover ? tint.opacity(0.35) : .black.opacity(0.05), radius: kind == .primary ? 12 : 6, y: kind == .primary ? 6 : 2)
-                .opacity(enabled ? 1 : 0.55)
-                .offset(y: configuration.isPressed ? 1 : 0)
-                .animation(.spring(duration: 0.18), value: configuration.isPressed)
-                .animation(.easeOut(duration: 0.16), value: hover)
+                .overlay { if kind == .glass { shape.strokeBorder(Brand.hairline, lineWidth: 1) } }
+                .shadow(color: kind == .primary ? tint.opacity(0.3) : .clear, radius: 8, y: 4)
+                .opacity(enabled ? 1 : 0.5)
+                .animation(.easeOut(duration: 0.15), value: configuration.isPressed)
                 .contentShape(shape)
                 .onHover { hover = $0 }
         }
@@ -308,7 +249,6 @@ struct Chip: View {
         .padding(.vertical, 4)
         .foregroundStyle(color.legible)
         .background(color.opacity(0.13), in: Capsule())
-        .overlay(Capsule().strokeBorder(color.opacity(0.32), lineWidth: 0.75))
     }
 }
 
@@ -330,10 +270,9 @@ struct ToggleChip: View {
             .font(.subheadline.weight(isOn ? .bold : .medium))
             .padding(.horizontal, 12)
             .padding(.vertical, 7)
-            .foregroundStyle(isOn ? color.legible : Brand.ink)
-            .background(isOn ? color.opacity(0.24) : Brand.paper, in: Capsule())
-            .overlay(Capsule().strokeBorder(isOn ? color.opacity(0.8) : Brand.hairline, lineWidth: isOn ? 1.5 : 1))
-            .shadow(color: isOn ? color.opacity(0.35) : .black.opacity(0.04), radius: isOn ? 8 : 2, y: 2)
+            .foregroundStyle(isOn ? Brand.canvas : Brand.ink)
+            .background(isOn ? Brand.ink : Brand.card, in: Capsule())
+            .overlay(Capsule().strokeBorder(isOn ? .clear : Brand.hairline, lineWidth: 1))
         }
         .buttonStyle(.plain)
         .animation(.spring(duration: 0.25), value: isOn)
@@ -353,15 +292,11 @@ struct GlassSegmented<T: Hashable & Identifiable>: View {
                 Button { withAnimation(.spring(duration: 0.3)) { selection = o } } label: {
                     Text(label(o))
                         .font(.subheadline.weight(on ? .bold : .medium))
-                        .foregroundStyle(on ? Brand.accentText : Brand.muted)
+                        .foregroundStyle(on ? Brand.ink : Brand.muted)
                         .padding(.vertical, 7)
                         .frame(maxWidth: .infinity)
                         .background {
-                            if on {
-                                RoundedRectangle(cornerRadius: 10, style: .continuous).fill(Brand.card)
-                                RoundedRectangle(cornerRadius: 10, style: .continuous).fill(Brand.accent.opacity(0.2))
-                                RoundedRectangle(cornerRadius: 10, style: .continuous).strokeBorder(Brand.accent.opacity(0.75), lineWidth: 1.5)
-                            }
+                            if on { Capsule().fill(Brand.card).shadow(color: .black.opacity(0.12), radius: 2, y: 1) }
                         }
                         .contentShape(Rectangle())
                 }
@@ -369,7 +304,7 @@ struct GlassSegmented<T: Hashable & Identifiable>: View {
             }
         }
         .padding(3)
-        .background(Brand.ink.opacity(0.055), in: RoundedRectangle(cornerRadius: 13, style: .continuous))
+        .background(Brand.surface, in: Capsule())
     }
 }
 
@@ -383,10 +318,7 @@ struct Glyph: View {
             .font(.system(size: size * 0.44, weight: .semibold))
             .foregroundStyle(color.legible)
             .frame(width: size, height: size)
-            .background(LinearGradient(colors: [.white.opacity(0.85), color.opacity(0.26)], startPoint: .topLeading, endPoint: .bottomTrailing),
-                        in: RoundedRectangle(cornerRadius: size * 0.31, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: size * 0.31, style: .continuous).strokeBorder(color.opacity(0.5), lineWidth: 1))
-            .shadow(color: color.opacity(0.4), radius: 8, y: 4)
+            .background(color.opacity(0.14), in: RoundedRectangle(cornerRadius: size * 0.31, style: .continuous))
     }
 }
 
@@ -402,7 +334,7 @@ struct AppMark: View {
                 .shadow(color: .black.opacity(0.18), radius: 1, y: 1)
         }
         .frame(width: size, height: size)
-        .shadow(color: Brand.accent.opacity(0.45), radius: size * 0.3, y: size * 0.12)
+
     }
 }
 
