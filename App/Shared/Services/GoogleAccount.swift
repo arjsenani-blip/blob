@@ -85,9 +85,18 @@ final class GoogleAccount: NSObject, ObservableObject, ASWebAuthenticationPresen
 
     private var keychainKey: String { "google.\(role.rawValue)" }
 
-    static var clientID: String {
-        (UserDefaults.standard.string(forKey: "googleClientID") ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+    /// Blob's own Google sign-in ID, built into the app (Info.plist `BlobGoogleClientID`), so "Sign in with Google"
+    /// works without any setup. A client ID typed in Settings → Advanced overrides it.
+    static var builtInClientID: String {
+        (Bundle.main.object(forInfoDictionaryKey: "BlobGoogleClientID") as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
     }
+    static var hasBuiltInClientID: Bool { builtInClientID.hasSuffix(".apps.googleusercontent.com") }
+
+    static var clientID: String {
+        let typed = (UserDefaults.standard.string(forKey: "googleClientID") ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        return typed.isEmpty ? builtInClientID : typed
+    }
+    static var isConfigured: Bool { clientID.hasSuffix(".apps.googleusercontent.com") }
 
     /// Google's iOS-type client IDs use the reversed client ID as the redirect scheme.
     static var redirectScheme: String {

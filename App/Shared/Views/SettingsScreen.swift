@@ -21,48 +21,7 @@ struct SettingsScreen: View {
 
             TickTickSection()
 
-            Section {
-                GoogleCalendarRows(school: school, personal: personal, clientMissing: clientID.isEmpty)
-            } header: {
-                Text("Google Calendar")
-            } footer: {
-                Text("Shows the calendars you have turned on in Google Calendar, and can put your events, assignment due dates and logged work on it. Assignments can also go in as Google Tasks, which Google Calendar shows on their due dates — tick one off there and it's done in Blob. Needs the Google Calendar API and Google Tasks API turned on in your Google Cloud project.")
-            }
-
-            Section {
-                TextField("OAuth client ID", text: $clientID, prompt: Text("1234-abc.apps.googleusercontent.com"))
-                    .font(.system(.body, design: .monospaced))
-                    #if os(iOS)
-                    .textInputAutocapitalization(.never)
-                    .autocorrectionDisabled()
-                    #endif
-                Button("How do I get this?") { showSetupHelp = true }
-            } header: {
-                Text("Google setup (one time)")
-            } footer: {
-                Text("Use the same client ID on your Mac and iPhone so they share the same sync folder.")
-            }
-
-            Section {
-                accountRow(school, label: "School account",
-                           scopes: GoogleAccount.classroomScopes + [GoogleAccount.driveScope])
-                if school.isSignedIn {
-                    Button {
-                        Task { await store.syncClassroom() }
-                    } label: {
-                        HStack {
-                            Label("Sync Classroom now", systemImage: "arrow.triangle.2.circlepath")
-                            Spacer()
-                            if store.isSyncingClassroom { ProgressView().controlSize(.small) }
-                        }
-                    }
-                    if let err = store.classroomError { Text(err).font(.caption).foregroundStyle(.red) }
-                }
-            } header: {
-                Text("Google Classroom")
-            } footer: {
-                Text("Read-only. Pulls assignments from your active classes, their due dates, and whether you've turned them in.")
-            }
+            GoogleSection(school: school, personal: personal, systemCalendar: systemCalendar, showSetupHelp: $showSetupHelp)
 
             Section {
                 LabeledContent("Syncing through") {
@@ -150,7 +109,7 @@ struct SettingsScreen: View {
 
     @ViewBuilder
     private func accountRow(_ account: GoogleAccount, label: String, scopes: [String]) -> some View {
-        AccountRow(account: account, label: label, scopes: scopes, disabled: clientID.isEmpty) {
+        AccountRow(account: account, label: label, scopes: scopes, disabled: !GoogleAccount.isConfigured) {
             Task { await store.syncEverything() }
         }
     }
@@ -203,13 +162,13 @@ private struct SetupHelp: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 14) {
                     Text("Google gives each app its own ID. This takes about 5 minutes, once:").foregroundStyle(.secondary)
-                    step(1, "Go to console.cloud.google.com and create a project called “Blob”.")
-                    step(2, "APIs & Services → Library: enable **Google Classroom API**, **Google Drive API**, **Google Calendar API** and **Google Tasks API**.")
-                    step(3, "OAuth consent screen: choose **External**, fill in the app name and your email. Under **Test users**, add your school email and your personal Gmail.")
-                    step(4, "Credentials → Create credentials → OAuth client ID → type **iOS**. Bundle ID: **com.arjunsenani.brain**.")
-                    step(5, "Copy the client ID (ends in .apps.googleusercontent.com) and paste it here on both your Mac and iPhone.")
-                    Text("If signing in with your school account says it's blocked, your school's Google admin restricts outside apps. Ask IT to allow it, or use a personal Gmail for sync — Classroom needs the school account.")
-                        .font(.footnote).foregroundStyle(.orange)
+                    step(1, "Go to console.cloud.google.com and create a project called “Blob” (free — no billing needed).")
+                    step(2, "APIs & Services → Library: enable **Google Classroom API**, **Google Drive API** and **Google Tasks API**.")
+                    step(3, "OAuth consent screen (Google Auth Platform): choose **External**, name it Blob, add your email. Under **Audience**, click **Publish app** so you aren't signed out every week.")
+                    step(4, "Clients → Create client → type **iOS**, bundle ID **com.arjunsenani.brain**.")
+                    step(5, "Copy the client ID (ends in .apps.googleusercontent.com) and give it to Claude to build into Blob — or paste it under Settings → Google → Advanced on each device.")
+                    Text("When you sign in, Google may say it hasn't verified the app — that's normal for your own app. Click Advanced → Go to Blob. Your Google calendars don't need any of this; they already work through this device's Google account.")
+                        .font(.footnote).foregroundStyle(.secondary)
                     Link("Open Google Cloud Console", destination: URL(string: "https://console.cloud.google.com/apis/credentials")!)
                         .buttonStyle(TintButtonStyle())
                 }
@@ -541,5 +500,144 @@ private struct AccentPicker: View {
             }
         }
         .padding(.vertical, 4)
+    }
+}
+
+/// Google, the easy way:
+/// - Calendar needs no sign-in: Blob uses the Google account already on this Mac/iPhone (System Settings → Internet Accounts).
+/// - One "Sign in with Google" button covers Classroom, Google Tasks and Mac ↔ iPhone sync.
+/// - The manual client-ID setup and the direct Google Calendar connection live under Advanced.
+private struct GoogleSection: View {
+    @EnvironmentObject var store: BrainStore
+    @ObservedObject var school: GoogleAccount
+    @ObservedObject var personal: GoogleAccount
+    @ObservedObject var systemCalendar: SystemCalendarBridge
+    @Binding var showSetupHelp: Bool
+    @AppStorage("googleClientID") private var clientID = ""
+    @State private var advanced = false
+
+    /// Google calendars this device already has through its Google account.
+    private var googleCalendars: [EKCalendar] {
+        _ = systemCalendar.changeToken
+        guard systemCalendar.authorized else { return [] }
+        return systemCalendar.store.calendars(for: .event).filter {
+            $0.source.title.localizedCaseInsensitiveContains("google") || $0.source.title.localizedCaseInsensitiveContains("gmail")
+        }
+    }
+
+    var body: some View {
+        Section {
+            // 1. Calendar through the system account.
+            let cals = googleCalendars
+            if !systemCalendar.authorized {
+                Button { Task { await systemCalendar.requestAccess(); store.useAppleCalendar = true } } label: {
+                    Label("Allow Blob to see your calendars", systemImage: "calendar.badge.checkmark")
+                }
+            } else if cals.isEmpty {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("No Google account on this \(device) yet.")
+                    Text(addAccountHint).font(.caption).foregroundStyle(.secondary)
+                    #if os(macOS)
+                    Button("Add a Google account…") {
+                        NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.Internet-Accounts-Settings.extension")!)
+                    }
+                    .buttonStyle(TintButtonStyle(kind: .primary, compact: true))
+                    #endif
+                }
+            } else {
+                HStack(alignment: .top, spacing: 10) {
+                    Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Google Calendar is connected")
+                        Text("Through this \(device)'s Google account · " + cals.map(\.title).sorted().joined(separator: ", "))
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                }
+                Toggle("Show these calendars in Blob", isOn: Binding(get: { store.useAppleCalendar }, set: { store.useAppleCalendar = $0 }))
+            }
+
+            // 2. One sign-in for the rest.
+            if school.isSignedIn {
+                HStack {
+                    Image(systemName: "person.crop.circle.badge.checkmark").foregroundStyle(.green)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(school.email ?? "Signed in with Google")
+                        Text("Classroom, Google Tasks and Mac ↔ iPhone sync").font(.caption).foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    Button("Sign out", role: .destructive) { school.signOut() }.buttonStyle(TintButtonStyle(kind: .glass, compact: true))
+                }
+                Toggle("Assignments as Google Tasks", isOn: Binding(get: { store.googleTasksOn }, set: { store.googleTasksOn = $0; Task { await store.syncGoogle() } }))
+            } else if GoogleAccount.isConfigured {
+                Button {
+                    Task {
+                        await school.signIn(scopes: GoogleAccount.classroomScopes + [GoogleAccount.driveScope, GoogleAccount.tasksScope])
+                        if school.isSignedIn { await store.syncEverything() }
+                    }
+                } label: {
+                    HStack(spacing: 10) {
+                        GoogleG()
+                        Text("Sign in with Google").fontWeight(.semibold)
+                        Spacer()
+                        if school.isWorking { ProgressView().controlSize(.small) }
+                    }
+                }
+                .buttonStyle(.plain)
+                .padding(.vertical, 4)
+                if let e = school.lastError { Text(e).font(.caption).foregroundStyle(.red) }
+            } else {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Sign in with Google needs a one-time setup").fontWeight(.semibold)
+                    Text("Only for Classroom, Google Tasks and Mac ↔ iPhone sync — your Google calendars already work above.")
+                        .font(.caption).foregroundStyle(.secondary)
+                    Button("Show me how (5 minutes)") { showSetupHelp = true }
+                        .buttonStyle(TintButtonStyle(kind: .glass, compact: true))
+                }
+            }
+
+            DisclosureGroup("Advanced", isExpanded: $advanced) {
+                TextField("Google OAuth client ID", text: $clientID, prompt: Text(GoogleAccount.hasBuiltInClientID ? "Using Blob's built-in ID" : "1234-abc.apps.googleusercontent.com"))
+                    .font(.system(.footnote, design: .monospaced))
+                    #if os(iOS)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                    #endif
+                Text("Google Calendar can also be connected directly (instead of through this \(device)'s account) — only needed for a Google calendar that isn't on this device.")
+                    .font(.caption).foregroundStyle(.secondary)
+                GoogleCalendarRows(school: school, personal: personal, clientMissing: !GoogleAccount.isConfigured)
+            }
+        } header: {
+            Text("Google")
+        } footer: {
+            Text("Free. Calendar uses the Google account already on this \(device). Sign in once for Classroom, Google Tasks and syncing your Mac and iPhone.")
+        }
+    }
+
+    private var device: String {
+        #if os(macOS)
+        "Mac"
+        #else
+        "iPhone"
+        #endif
+    }
+    private var addAccountHint: String {
+        #if os(macOS)
+        "Add it in System Settings → Internet Accounts → Google, with Calendars turned on. Blob picks it up right away."
+        #else
+        "Add it in Settings → Apps → Calendar → Calendar Accounts → Add Account → Google. Blob picks it up right away."
+        #endif
+    }
+}
+
+/// The Google "G", drawn (no image asset needed).
+private struct GoogleG: View {
+    var body: some View {
+        Text("G").font(.system(size: 15, weight: .bold, design: .rounded))
+            .foregroundStyle(LinearGradient(colors: [Color(red: 0.26, green: 0.52, blue: 0.96), Color(red: 0.92, green: 0.26, blue: 0.21),
+                                                     Color(red: 0.98, green: 0.74, blue: 0.02), Color(red: 0.20, green: 0.66, blue: 0.33)],
+                                            startPoint: .topLeading, endPoint: .bottomTrailing))
+            .frame(width: 28, height: 28)
+            .background(Brand.card, in: Circle())
+            .overlay(Circle().strokeBorder(Brand.hairline))
     }
 }

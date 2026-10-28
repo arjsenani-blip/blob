@@ -42,6 +42,7 @@ targets:
         NSCalendarsFullAccessUsageDescription: Shows your calendar events alongside your plan so homework isn't scheduled on top of them, and adds Blob's events to a Blob calendar.
         NSRemindersFullAccessUsageDescription: Puts your assignments in a Homework list so they show up as tasks in Calendar and Reminders, and marks them done when you tick them off there.
         NSHumanReadableCopyright: Made for Arjun
+        BlobGoogleClientID: ""
     settings:
       base:
         PRODUCT_NAME: ArjunsBrain
@@ -88,6 +89,7 @@ targets:
         NSCalendarsFullAccessUsageDescription: Shows your calendar events alongside your plan so homework isn't scheduled on top of them, and adds Blob's events to a Blob calendar.
         NSRemindersFullAccessUsageDescription: Puts your assignments in a Homework list so they show up as tasks in Calendar and Reminders, and marks them done when you tick them off there.
         ITSAppUsesNonExemptEncryption: false
+        BlobGoogleClientID: ""
     settings:
       base:
         PRODUCT_NAME: ArjunsBrain
