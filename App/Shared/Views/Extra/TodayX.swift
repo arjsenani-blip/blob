@@ -104,7 +104,7 @@ struct TodayX: View {
             }
             Spacer(minLength: 12)
             if wide { XAskBar().frame(minWidth: 260, maxWidth: 480) }
-            XToolbarPill(onSearch: openSearch, onSettings: openSettings)
+            XToolbarPill(onSearch: openSearch, onSettings: openSettings, onFocus: XTab.visible.contains(.focus) ? nil : { tab = .focus })
         }
     }
 

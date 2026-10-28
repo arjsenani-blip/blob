@@ -28,6 +28,7 @@ struct ArjunsBrainApp: App {
             .commands {
                 CommandGroup(after: .newItem) {
                     Button("Log Work…") { store.showLogSheet = true }.keyboardShortcut("l")
+                    Button("Ask Blob…") { store.showAssistant = true }.keyboardShortcut("j")
                     Button("Quick Add…") { store.showQuickAdd = true }.keyboardShortcut("k")
                     Button("Check In") { store.checkIn() }.keyboardShortcut("i")
                     Button("Sync Now") { Task { await store.syncEverything() } }.keyboardShortcut("r")
@@ -82,12 +83,13 @@ struct RootView: View {
         ZStack(alignment: .bottom) {
             screen
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-            XTabBar(tab: $tab) { store.showQuickAdd = true }
+            XTabBar(tab: $tab) { store.showAssistant = true }
                 .padding(.horizontal, 12)
                 .padding(.bottom, bottomInset)
         }
         .background(X.page.ignoresSafeArea())
         .sheet(isPresented: $store.showQuickAdd) { QuickAddSheet().environmentObject(store) }
+        .sheet(isPresented: $store.showAssistant) { AssistantSheet().environmentObject(store) }
         .sheet(isPresented: $store.showLogSheet) { LogSheet(taskID: nil).environmentObject(store) }
         .sheet(item: $store.logSheetTask) { LogSheet(taskID: $0.id).environmentObject(store) }
         .sheet(isPresented: $showSettings) {
@@ -105,6 +107,7 @@ struct RootView: View {
         .animation(.spring(duration: 0.35), value: store.toast)
         #if os(macOS)
         .task { await WindowSnapshot.runIfRequested(store: store) { tab = $0 } }
+        .task { await AssistantProbe.runIfRequested(store: store) }
         #endif
     }
 
@@ -294,6 +297,25 @@ struct MenuBarPanel: View {
             items.append((o.start, (o.id, o.title, o.start.dueText(), Brand.color(for: o))))
         }
         return items.sorted { $0.0 < $1.0 }.prefix(5).map(\.1)
+    }
+}
+
+/// `ArjunsBrain -dataDir <test folder> -assistantProbe "first|second"` sends each line to the assistant, prints the replies
+/// and changes, then quits. Test data only, so it never touches your real calendar or to-dos.
+@MainActor
+enum AssistantProbe {
+    static func runIfRequested(store: BrainStore) async {
+        guard let script = UserDefaults.standard.string(forKey: "assistantProbe"), store.isTestData else { return }
+        let a = BlobAssistant.shared
+        a.store = store
+        for prompt in script.components(separatedBy: "|") {
+            await a.send(prompt)
+            guard let reply = a.messages.last else { continue }
+            print("> \(prompt)\n< \(reply.text)")
+            for id in reply.changes { if let c = a.change(id) { print("  ✓ \(c.summary)") } }
+        }
+        fflush(stdout)
+        NSApp.terminate(nil)
     }
 }
 

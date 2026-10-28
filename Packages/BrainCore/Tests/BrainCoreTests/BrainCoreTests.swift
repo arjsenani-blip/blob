@@ -620,3 +620,43 @@ final class DedupeTests: XCTestCase {
                                                 title: "Club Fencing", start: at(28, 18, 35), end: at(28, 20), allDay: false, calendar: cal))
     }
 }
+
+final class EstimateTests: XCTestCase {
+    func testToDosByWhatYouActuallyDo() {
+        XCTAssertEqual(Estimates.taskMinutes(for: "Sign up for Peach State"), 10)
+        XCTAssertEqual(Estimates.taskMinutes(for: "sign up for the fencing tournament"), 10)
+        XCTAssertEqual(Estimates.taskMinutes(for: "need to register for the SAT"), 10)
+        XCTAssertEqual(Estimates.taskMinutes(for: "text coach"), 5)
+        XCTAssertEqual(Estimates.taskMinutes(for: "Take out the trash"), 5)
+        XCTAssertEqual(Estimates.taskMinutes(for: "Clean room"), 45)
+        XCTAssertEqual(Estimates.taskMinutes(for: "English essay"), 120)
+        XCTAssertEqual(Estimates.taskMinutes(for: "calc worksheet"), 35)
+        XCTAssertEqual(Estimates.taskMinutes(for: "calc worksheet", learned: 50), 50, "your own average wins for school work")
+        XCTAssertEqual(Estimates.taskMinutes(for: "text coach", learned: 50), 5, "but not for errands")
+        XCTAssertEqual(Estimates.taskMinutes(for: "something vague"), 30)
+    }
+
+    func testEventsByWhatTheyAre() {
+        XCTAssertEqual(Estimates.eventMinutes(for: "Fencing tournament"), 480)
+        XCTAssertEqual(Estimates.eventMinutes(for: "Soccer practice"), 120)
+        XCTAssertEqual(Estimates.eventMinutes(for: "Dentist"), 60)
+        XCTAssertEqual(Estimates.eventMinutes(for: "Dinner with grandma"), 90)
+        XCTAssertEqual(Estimates.eventMinutes(for: "Movie"), 150)
+        XCTAssertEqual(Estimates.eventMinutes(for: "Bio quiz"), 30)
+        XCTAssertEqual(Estimates.eventMinutes(for: "Lunch with Sam"), 60)
+    }
+
+    func testSignUpsAreNeverBigProjects() {
+        let now = Date()
+        XCTAssertFalse(MilestonePlanner.looksLongTerm(title: "sign up for the AP exam", due: now.addingTimeInterval(10 * 86_400), now: now))
+        XCTAssertTrue(MilestonePlanner.looksLongTerm(title: "History research paper", due: now.addingTimeInterval(10 * 86_400), now: now))
+    }
+
+    func testParsedEventLengths() {
+        var c = Calendar(identifier: .gregorian); c.timeZone = TimeZone(identifier: "America/New_York")!
+        let now = c.date(from: DateComponents(year: 2026, month: 10, day: 28, hour: 11))!
+        let p = NaturalLanguageParser(calendar: c, now: now).parse("fencing tournament saturday 8am")
+        XCTAssertEqual(p.kind, .event)
+        XCTAssertEqual(p.end.map { Int($0.timeIntervalSince(p.start!) / 60) }, 480)
+    }
+}

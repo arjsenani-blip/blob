@@ -434,7 +434,7 @@ public struct NaturalLanguageParser {
                 result.end = end
                 result.durationMinutes = Int(end.timeIntervalSince(s) / 60)
             } else {
-                result.end = s.addingTimeInterval(Double(duration ?? 60) * 60)
+                result.end = s.addingTimeInterval(Double(duration ?? Estimates.eventMinutes(for: result.title)) * 60)
             }
         } else {
             result.isAllDay = true

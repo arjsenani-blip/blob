@@ -42,7 +42,7 @@ extension BrainStore {
             for item in r.imported where task(item.id) == nil {
                 let parsed = parse(item.title)
                 upsert(BrainTask(id: item.id, title: item.title, course: item.course ?? parsed.course, notes: item.notes,
-                                 due: item.due ?? (parsed.kind == .task ? parsed.start : nil), estimatedMinutes: parsed.durationMinutes ?? 30,
+                                 due: item.due ?? (parsed.kind == .task ? parsed.start : nil), estimatedMinutes: parsed.durationMinutes ?? Estimates.taskMinutes(for: parsed.title),
                                  externalID: "ticktick:\(item.id.uuidString)"))
             }
             if !r.completed.isEmpty { show("Marked done from TickTick ✓") }

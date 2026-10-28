@@ -149,8 +149,14 @@ extension View {
 struct XToolbarPill: View {
     var onSearch: () -> Void
     var onSettings: () -> Void
+    /// The iPhone has no Focus tab; Today shows a 🍅 here instead.
+    var onFocus: (() -> Void)? = nil
     var body: some View {
         HStack(spacing: 2) {
+            if let onFocus {
+                Button(action: onFocus) { Text("🍅").font(.system(size: 18)).frame(width: 38, height: 38) }
+                    .accessibilityLabel("Focus timer")
+            }
             Button(action: onSearch) { Image(systemName: "magnifyingglass").frame(width: 38, height: 38) }
                 .accessibilityLabel("Search")
             Button(action: onSettings) { Image(systemName: "line.3.horizontal.decrease").frame(width: 38, height: 38) }
@@ -234,10 +240,10 @@ enum XTab: String, CaseIterable, Identifiable {
         }
     }
     var shortTitle: String { self == .tasks ? "Tasks" : title }
-    /// The iPhone has room for five; Activity lives under Assignments there.
+    /// Two on each side of the + on the iPhone (Focus opens from Today, Activity from Assignments); three on the Mac.
     static var visible: [XTab] {
         #if os(iOS)
-        return [.today, .calendar, .tasks, .routines, .focus]
+        return [.today, .calendar, .tasks, .routines]
         #else
         return allCases
         #endif
@@ -250,44 +256,50 @@ struct XTabBar: View {
     @ObservedObject private var pomodoro = Pomodoro.shared
 
     var body: some View {
+        let tabs = XTab.visible
+        let half = (tabs.count + 1) / 2
         HStack(spacing: compact ? 0 : 4) {
-            ForEach(XTab.visible) { t in
-                Button { withAnimation(.spring(duration: 0.3)) { tab = t } } label: {
-                    VStack(spacing: 1) {
-                        ZStack(alignment: .topTrailing) {
-                            Text(t.emoji).font(.system(size: compact ? 22 : 24))
-                            if t == .focus, pomodoro.isRunning {
-                                Circle().fill(X.purple).frame(width: 8, height: 8).offset(x: 3, y: -1)
-                            }
-                        }
-                        Text(compact ? t.shortTitle : t.title)
-                            .font(.system(size: compact ? 11 : 13, weight: tab == t ? .bold : .semibold))
-                            .foregroundStyle(tab == t ? X.ink : X.muted)
-                    }
-                    .padding(.horizontal, compact ? 6 : 16).padding(.vertical, 5)
-                    .background(tab == t ? X.purpleSoft : .clear, in: Capsule())
-                    .contentShape(Capsule())
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel(t.title)
-                .accessibilityAddTraits(tab == t ? .isSelected : [])
-                if compact { Spacer(minLength: 0) }
-            }
+            ForEach(tabs.prefix(half)) { tabButton($0) }
             Button(action: onAdd) {
-                Image(systemName: "plus").font(.system(size: 22, weight: .bold)).foregroundStyle(.white)
-                    .frame(width: 50, height: 50)
+                Image(systemName: "plus").font(.system(size: 24, weight: .bold)).foregroundStyle(.white)
+                    .frame(width: 54, height: 54)
                     .background(X.purple, in: Circle())
-                    .shadow(color: X.purple.opacity(0.35), radius: 9, y: 6)
+                    .shadow(color: X.purple.opacity(0.4), radius: 10, y: 6)
             }
             .buttonStyle(.plain)
-            .accessibilityLabel("Add")
-            .padding(.leading, compact ? 0 : 4)
+            .accessibilityLabel("Ask Blob")
+            .help("Ask Blob — add, move or change anything")
+            .padding(.horizontal, compact ? 4 : 8)
+            ForEach(tabs.dropFirst(half)) { tabButton($0) }
         }
-        .padding(.leading, compact ? 10 : 14).padding(.trailing, 7).padding(.vertical, 7)
+        .padding(.horizontal, compact ? 10 : 12).padding(.vertical, 6)
         .background(.ultraThinMaterial, in: Capsule())
         .background(X.raised.opacity(0.75), in: Capsule())
         .overlay(Capsule().strokeBorder(X.line, lineWidth: 1))
         .shadow(color: .black.opacity(0.14), radius: 20, y: 10)
+    }
+
+    private func tabButton(_ t: XTab) -> some View {
+        Button { withAnimation(.spring(duration: 0.3)) { tab = t } } label: {
+            VStack(spacing: 1) {
+                ZStack(alignment: .topTrailing) {
+                    Text(t.emoji).font(.system(size: compact ? 22 : 24))
+                    if t == .focus, pomodoro.isRunning {
+                        Circle().fill(X.purple).frame(width: 8, height: 8).offset(x: 3, y: -1)
+                    }
+                }
+                Text(compact ? t.shortTitle : t.title)
+                    .font(.system(size: compact ? 11 : 13, weight: tab == t ? .bold : .semibold))
+                    .foregroundStyle(tab == t ? X.ink : X.muted)
+            }
+            .padding(.horizontal, compact ? 8 : 16).padding(.vertical, 5)
+            .background(tab == t ? X.purpleSoft : .clear, in: Capsule())
+            .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(t.title)
+        .accessibilityAddTraits(tab == t ? .isSelected : [])
+        .frame(maxWidth: compact ? .infinity : nil)
     }
 
     private var compact: Bool {

@@ -192,6 +192,7 @@ public enum TaskMatcher {
 extension MilestonePlanner {
     /// Rough whole-assignment estimate for something big when you didn't say how long it takes.
     public static func defaultEstimate(title: String) -> Int? {
+        if Estimates.isErrand(title) { return nil }
         let t = title.lowercased()
         func has(_ w: String...) -> Bool { w.contains { t.contains($0) } }
         if has("science fair", "final project", "portfolio", "research paper", "thesis") { return 600 }
@@ -207,6 +208,7 @@ extension MilestonePlanner {
     /// Should a newly added assignment be tracked long-term with steps?
     public static func looksLongTerm(title: String, due: Date?, now: Date = Date(), explicit: Bool = false) -> Bool {
         if explicit { return true }
+        if Estimates.isErrand(title) { return false }
         guard let due, due.timeIntervalSince(now) >= 4 * 86_400 else { return false }
         if title.lowercased().range(of: #"\b(hw|homework|worksheet|problem set|pset)\b"#, options: .regularExpression) != nil { return false }
         return defaultEstimate(title: title) != nil

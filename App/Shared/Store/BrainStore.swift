@@ -7,6 +7,7 @@ final class BrainStore: ObservableObject {
     static let shared = BrainStore()
     @Published private(set) var doc: BrainDocument
     @Published var showQuickAdd = false
+    @Published var showAssistant = false
     @Published var toast: String?
     /// Opens the log sheet (⌘L), optionally on one assignment.
     @Published var logSheetTask: IDBox?
@@ -119,11 +120,16 @@ final class BrainStore: ObservableObject {
     // MARK: Lifecycle
 
     func onLaunch() async {
-        repairAccidentalSteps()
-        convertHomeworkEvents()
-        convertToDoEvents()
+        // One-time fixes to your real data. Test runs (-dataDir) share these flags, so they must not use them up.
+        if !isTestData {
+            repairAccidentalSteps()
+            convertHomeworkEvents()
+            convertToDoEvents()
+            reestimateDefaultTasks()
+        }
         _ = await Reminders.requestAuthorization()
         Pomodoro.shared.store = self
+        BlobAssistant.shared.store = self
         Pomodoro.shared.catchUp()
         systemCalendar.onExternalChange = { [weak self] in
             guard let self, Date().timeIntervalSince(self.lastAppleWrite) > 3 else { return }
@@ -214,7 +220,9 @@ final class BrainStore: ObservableObject {
             let explicitLong = title.range(of: longPattern, options: [.regularExpression, .caseInsensitive]) != nil
             let cleanTitle = explicitLong ? title.replacingOccurrences(of: longPattern, with: " ", options: [.regularExpression, .caseInsensitive])
                 .trimmingCharacters(in: .whitespaces) : title
-            let t = BrainTask(title: cleanTitle.isEmpty ? title : cleanTitle, course: p.course ?? p.tag, due: due, estimatedMinutes: p.durationMinutes ?? 30,
+            let course = p.course ?? p.tag
+            let t = BrainTask(title: cleanTitle.isEmpty ? title : cleanTitle, course: course, due: due,
+                              estimatedMinutes: p.durationMinutes ?? Estimates.taskMinutes(for: cleanTitle, learned: course.flatMap(learnedEstimate(course:))),
                               priority: p.priority, estimateIsUserSet: p.durationMinutes != nil,
                               repeats: p.recurrence.isRepeating ? p.recurrence : nil)
             upsert(t)
@@ -522,7 +530,7 @@ final class BrainStore: ObservableObject {
                 let parsed = parse(item.title)
                 upsert(BrainTask(id: item.id, title: item.title, course: parsed.course, notes: item.notes,
                                  due: item.due ?? (parsed.kind == .task ? parsed.start : nil),
-                                 estimatedMinutes: parsed.durationMinutes ?? 30, priority: item.highPriority ? .high : .normal,
+                                 estimatedMinutes: parsed.durationMinutes ?? Estimates.taskMinutes(for: parsed.title), priority: item.highPriority ? .high : .normal,
                                  externalID: "reminder:\(item.id.uuidString)"))
                 setUpLongTermIfNeeded(item.id, explicit: false)
             }
@@ -581,13 +589,24 @@ final class BrainStore: ObservableObject {
             let due = e.isAllDay ? cal.date(bySettingHour: 23, minute: 59, second: 0, of: day)! : day
             let id = UUID.stable(from: "event-as-todo:\(e.id.uuidString)")
             if task(id) == nil, !hasOpenTask(titled: e.title) {
-                upsert(BrainTask(id: id, title: e.title, course: e.tag, notes: e.notes, due: due, estimatedMinutes: 30,
+                upsert(BrainTask(id: id, title: e.title, course: e.tag, notes: e.notes, due: due, estimatedMinutes: Estimates.taskMinutes(for: e.title),
                                  repeats: e.recurrence.isRepeating ? e.recurrence : nil))
             }
             delete(e)
             moved.append(e.title)
         }
         if !moved.isEmpty { show("Moved \(moved.count) to-do\(moved.count == 1 ? "" : "s") off the calendar") }
+    }
+
+    /// Once: to-dos that got the old flat 30-minute guess get a real one ("Sign up for Peach State" → 10 min).
+    func reestimateDefaultTasks() {
+        guard !UserDefaults.standard.bool(forKey: "reestimatedDefaultTasks2") else { return }
+        UserDefaults.standard.set(true, forKey: "reestimatedDefaultTasks2")
+        for var t in tasks where !t.isCompleted && !t.estimateIsUserSet && t.estimatedMinutes == 30 && t.source != .classroom
+            && t.sessions.isEmpty && t.milestones.isEmpty {
+            let m = parse(t.title).durationMinutes ?? Estimates.taskMinutes(for: t.title, learned: t.course.flatMap(learnedEstimate(course:)))
+            if m != t.estimatedMinutes { t.estimatedMinutes = m; upsert(t) }
+        }
     }
 
     private func hasOpenTask(titled title: String) -> Bool {

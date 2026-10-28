@@ -53,6 +53,43 @@ final class SystemCalendarBridge: ObservableObject {
         }
     }
 
+    struct EditProblem: LocalizedError {
+        var errorDescription: String?
+    }
+
+    /// The calendar event behind an occurrence id ("ek:<item>@<start>"), the right occurrence of a repeating one.
+    private func ekEvent(_ occurrenceID: String) -> EKEvent? {
+        guard occurrenceID.hasPrefix("ek:"), let at = occurrenceID.lastIndex(of: "@"),
+              let ts = TimeInterval(occurrenceID[occurrenceID.index(after: at)...]) else { return nil }
+        let itemID = String(occurrenceID[occurrenceID.index(occurrenceID.startIndex, offsetBy: 3)..<at])
+        guard let item = store.calendarItem(withIdentifier: itemID) as? EKEvent else { return nil }
+        guard item.hasRecurrenceRules else { return item }
+        let start = Date(timeIntervalSince1970: ts)
+        let p = store.predicateForEvents(withStart: start.addingTimeInterval(-60), end: start.addingTimeInterval(86_400), calendars: [item.calendar])
+        return store.events(matching: p).first { $0.calendarItemIdentifier == itemID && abs($0.startDate.timeIntervalSince(start)) < 60 } ?? item
+    }
+
+    /// Change one event in Apple Calendar (which writes through to Google). Only this occurrence of a repeating event.
+    /// Returns the new occurrence id.
+    func update(_ occurrenceID: String, title: String? = nil, start: Date? = nil, end: Date? = nil, allDay: Bool? = nil, location: String? = nil) throws -> String {
+        guard authorized, let ev = ekEvent(occurrenceID) else { throw EditProblem(errorDescription: "I couldn't find that event in your calendar.") }
+        guard ev.calendar.allowsContentModifications else {
+            throw EditProblem(errorDescription: "“\(ev.title ?? "That event")” is on \(ev.calendar.title), which can't be edited from here.")
+        }
+        if let title { ev.title = title }
+        if let allDay { ev.isAllDay = allDay }
+        if let start { ev.startDate = start }
+        if let end { ev.endDate = end }
+        if let location { ev.location = location.isEmpty ? nil : location }
+        do {
+            try store.save(ev, span: .thisEvent, commit: true)
+        } catch {
+            throw EditProblem(errorDescription: "Calendar wouldn't save “\(ev.title ?? "that event")” — it may be an invite someone else owns.")
+        }
+        changeToken += 1
+        return "ek:\(ev.calendarItemIdentifier)@\(Int(ev.startDate.timeIntervalSince1970))"
+    }
+
     private static func hex(_ c: CGColor) -> String? {
         guard let comps = c.converted(to: CGColorSpace(name: CGColorSpace.sRGB)!, intent: .defaultIntent, options: nil)?.components,
               comps.count >= 3 else { return nil }
