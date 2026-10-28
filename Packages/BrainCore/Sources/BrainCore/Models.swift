@@ -382,13 +382,16 @@ public struct BrainDocument: Codable, Hashable {
     public var tasks: [BrainTask]
     public var plans: [DayPlan]
     public var settings: PlannerSettings
+    public var routines: [DailyRoutine]
 
-    public init(events: [BrainEvent] = [], tasks: [BrainTask] = [], plans: [DayPlan] = [], settings: PlannerSettings = .init()) {
+    public init(events: [BrainEvent] = [], tasks: [BrainTask] = [], plans: [DayPlan] = [], settings: PlannerSettings = .init(),
+                routines: [DailyRoutine] = []) {
         self.schemaVersion = Self.currentSchema
         self.events = events
         self.tasks = tasks
         self.plans = plans
         self.settings = settings
+        self.routines = routines
     }
 
     public init(from decoder: Decoder) throws {
@@ -398,6 +401,7 @@ public struct BrainDocument: Codable, Hashable {
         tasks = try c.decodeIfPresent([BrainTask].self, forKey: .tasks) ?? []
         plans = try c.decodeIfPresent([DayPlan].self, forKey: .plans) ?? []
         settings = try c.decodeIfPresent(PlannerSettings.self, forKey: .settings) ?? .init()
+        routines = try c.decodeIfPresent([DailyRoutine].self, forKey: .routines) ?? []
     }
 }
 

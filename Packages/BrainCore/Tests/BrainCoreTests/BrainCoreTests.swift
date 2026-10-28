@@ -443,3 +443,46 @@ final class StepSuggestionTests: XCTestCase {
         XCTAssertFalse(MilestonePlanner.looksLongTerm(title: "finish stats hw", due: now.addingTimeInterval(6 * 86_400)))
     }
 }
+
+final class RoutineTests: XCTestCase {
+    func testBedtimeRoutineEndsAtLightsOut() {
+        let r = RoutineParser.parse("bedtime routine: shower 15 min, brush teeth, skincare, read 20 minutes, lights out at 10:30")
+        XCTAssertEqual(r.name, "Bedtime routine")
+        XCTAssertEqual(r.steps.map(\.title), ["Shower", "Brush teeth", "Skincare", "Read", "Lights out"])
+        XCTAssertEqual(r.steps.map(\.minutes), [15, 3, 5, 20, 1])
+        XCTAssertEqual(r.anchor, .end)
+        XCTAssertEqual(r.time, 22 * 60 + 30)
+        XCTAssertEqual(r.startMinute, 22 * 60 + 30 - 44)
+        XCTAssertEqual(r.steps.first?.symbol, "shower.fill")
+        XCTAssertEqual(r.steps.last?.symbol, "moon.zzz.fill")
+        XCTAssertEqual(r.steps[1].symbol, "mouth.fill")
+    }
+
+    func testMorningRoutineStartsAtTime() {
+        let r = RoutineParser.parse("Morning routine starting at 6:45 — wake up, make bed 2 min, then shower and get dressed. Breakfast 15m, pack bag")
+        XCTAssertEqual(r.name, "Morning routine")
+        XCTAssertEqual(r.anchor, .start)
+        XCTAssertEqual(r.time, 6 * 60 + 45)
+        XCTAssertEqual(r.steps.map(\.title), ["Wake up", "Make bed", "Shower", "Get dressed", "Breakfast", "Pack bag"])
+        XCTAssertEqual(r.steps[1].minutes, 2)
+        XCTAssertEqual(r.steps[1].symbol, "sparkles", "make bed beats bed")
+        let tl = r.timeline(on: Date())
+        XCTAssertEqual(tl.count, 6)
+        XCTAssertEqual(tl[1].start.timeIntervalSince(tl[0].start), 2 * 60)
+    }
+
+    func testNoNameNoTime() {
+        let r = RoutineParser.parse("stretch, journal for 10 minutes, meditate half an hour")
+        XCTAssertEqual(r.steps.map(\.minutes), [10, 10, 30])
+        XCTAssertEqual(r.anchor, .start)
+        XCTAssertEqual(r.steps[2].symbol, "brain.head.profile")
+    }
+
+    func testRoutinesSurviveOldFilesAndMerge() throws {
+        let old = try JSONDecoder().decode(BrainDocument.self, from: Data(#"{"events":[],"tasks":[],"plans":[]}"#.utf8))
+        XCTAssertTrue(old.routines.isEmpty)
+        var a = BrainDocument(); a.routines = [DailyRoutine(name: "A", steps: [])]
+        var b = BrainDocument(); b.routines = [DailyRoutine(name: "B", steps: [])]
+        XCTAssertEqual(SyncMerger.merge(a, b).routines.count, 2)
+    }
+}

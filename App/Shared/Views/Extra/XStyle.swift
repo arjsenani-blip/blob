@@ -211,13 +211,14 @@ struct XAskBar: View {
 // MARK: - Floating tab bar
 
 enum XTab: String, CaseIterable, Identifiable {
-    case today, calendar, tasks, focus, activity
+    case today, calendar, tasks, routines, focus, activity
     var id: String { rawValue }
     var emoji: String {
         switch self {
         case .today: return "🗓️"
         case .calendar: return "📆"
         case .tasks: return "📚"
+        case .routines: return "🌙"
         case .focus: return "🍅"
         case .activity: return "📈"
         }
@@ -227,15 +228,16 @@ enum XTab: String, CaseIterable, Identifiable {
         case .today: return "Today"
         case .calendar: return "Calendar"
         case .tasks: return "Assignments"
+        case .routines: return "Routines"
         case .focus: return "Focus"
         case .activity: return "Activity"
         }
     }
     var shortTitle: String { self == .tasks ? "Tasks" : title }
-    /// The iPhone has room for four; Activity lives under Assignments there.
+    /// The iPhone has room for five; Activity lives under Assignments there.
     static var visible: [XTab] {
         #if os(iOS)
-        return [.today, .calendar, .tasks, .focus]
+        return [.today, .calendar, .tasks, .routines, .focus]
         #else
         return allCases
         #endif
@@ -262,7 +264,7 @@ struct XTabBar: View {
                             .font(.system(size: compact ? 11 : 13, weight: tab == t ? .bold : .semibold))
                             .foregroundStyle(tab == t ? X.ink : X.muted)
                     }
-                    .padding(.horizontal, compact ? 9 : 16).padding(.vertical, 5)
+                    .padding(.horizontal, compact ? 6 : 16).padding(.vertical, 5)
                     .background(tab == t ? X.purpleSoft : .clear, in: Capsule())
                     .contentShape(Capsule())
                 }

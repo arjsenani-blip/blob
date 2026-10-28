@@ -4,7 +4,7 @@ import BrainCore
 /// Everything for one day, written the way Extra writes your inbox: short sentences with the key words in bold,
 /// grouped into "Due soon", "Happening today" and "Good to know".
 struct FeedItem: Identifiable, Hashable {
-    enum Kind: Hashable { case task(UUID), event(String, UUID?), focusBlock(UUID?), note }
+    enum Kind: Hashable { case task(UUID), event(String, UUID?), focusBlock(UUID?), routine(UUID), note }
     var id: String
     var kind: Kind
     var emoji: String
@@ -170,6 +170,15 @@ struct DayFeed {
                 happening.append(FeedItem(id: "b-\(b.id)", kind: .focusBlock(b.taskID), emoji: "🍅", tone: .today, sentence: s,
                                           meta: "\(b.minutes) min · planned by Blob", category: t.map(Self.category(for:)) ?? "School", sort: b.start))
             }
+        }
+        // Routines that still have steps ahead today.
+        for r in store.routines(on: day) {
+            let t = r.timeline(on: day)
+            guard let first = t.first, let last = t.last, last.end > (isToday ? now : dayStart) else { continue }
+            let names = r.steps.prefix(3).map(\.title).joined(separator: ", ")
+            happening.append(FeedItem(id: "r-\(r.id)", kind: .routine(r.id), emoji: "🌙", tone: .today,
+                                      sentence: "**\(r.name)** at \(first.start.formatted(date: .omitted, time: .shortened)) — \(names)\(r.steps.count > 3 ? " and \(r.steps.count - 3) more" : "").",
+                                      meta: "\(r.steps.count) steps · done by \(last.end.formatted(date: .omitted, time: .shortened))", category: "Routines", sort: first.start))
         }
         happening.sort { $0.sort < $1.sort }
 

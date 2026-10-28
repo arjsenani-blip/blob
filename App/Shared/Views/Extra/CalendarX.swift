@@ -151,7 +151,7 @@ enum CalTone {
         case "sports", "fitness": return .today
         case "school": return .blue
         case "assignments": return .alert
-        case "focus": return .due
+        case "focus", "routines": return .due
         case "holidays": return .good
         default: return .due
         }
@@ -163,6 +163,7 @@ enum CalTone {
         case "school": return Color(red: 0.23, green: 0.48, blue: 0.94)
         case "assignments": return Color(red: 0.86, green: 0.27, blue: 0.23)
         case "focus": return X.purple
+        case "routines": return Color(red: 0.36, green: 0.42, blue: 0.86)
         case "holidays": return Color(red: 0.94, green: 0.71, blue: 0.16)
         default: return Color(red: 0.55, green: 0.35, blue: 0.95)
         }
@@ -170,7 +171,7 @@ enum CalTone {
 }
 
 struct DayBlock: Identifiable {
-    enum Kind { case event(EventOccurrence), focus(UUID?), logged(UUID) }
+    enum Kind { case event(EventOccurrence), focus(UUID?), logged(UUID), routine(UUID) }
     var id: String
     var kind: Kind
     var title: String
@@ -187,8 +188,9 @@ extension BrainStore {
         let now = Date()
         var set = Set(occurrences(in: DateInterval(start: now.addingTimeInterval(-30 * 86_400), duration: 90 * 86_400)).map(DayFeed.category(for:)))
         set.formUnion(["Assignments", "Focus"])
-        let order = ["School", "Family", "Sports", "Personal", "Assignments", "Focus", "Holidays"]
-        return set.sorted { (order.firstIndex(of: $0) ?? 6, $0) < (order.firstIndex(of: $1) ?? 6, $1) }
+        if !routines.isEmpty { set.insert("Routines") }
+        let order = ["School", "Family", "Sports", "Personal", "Assignments", "Focus", "Routines", "Holidays"]
+        return set.sorted { (order.firstIndex(of: $0) ?? 7, $0) < (order.firstIndex(of: $1) ?? 7, $1) }
     }
 
     /// Timed things on a day: events, Blob's planned focus blocks, and logged work.
@@ -202,7 +204,16 @@ extension BrainStore {
                             detail: o.start.formatted(date: .omitted, time: .shortened) + " – " + o.end.formatted(date: .omitted, time: .shortened) + (o.location.map { " · " + ($0.components(separatedBy: ",").first ?? $0) } ?? ""),
                             start: max(o.start, s), end: min(o.end, e), category: c, dashed: false)
         }
-        guard !hidden.contains("Focus") else { return out }
+        if !hidden.contains("Routines") {
+            for r in routines(on: day) {
+                let t = r.timeline(on: day)
+                guard let first = t.first, let last = t.last else { continue }
+                out.append(DayBlock(id: "r\(r.id)", kind: .routine(r.id), title: "🌙 " + r.name,
+                                    detail: r.steps.map(\.title).joined(separator: " · "),
+                                    start: max(first.start, s), end: min(last.end, e), category: "Routines", dashed: false))
+            }
+        }
+        guard !hidden.contains("Focus") else { return out.sorted { $0.start < $1.start } }
         if cal.isDateInToday(day), let plan = todayPlan {
             out += plan.blocks.filter { $0.kind == .task && !isBlockDone($0) }.map {
                 DayBlock(id: "b\($0.id)", kind: .focus($0.taskID), title: "🍅 " + $0.title, detail: "Focus · \($0.minutes) min",
@@ -412,6 +423,7 @@ struct DayTimeline: View {
                             case .event(let o): openEvent(o)
                             case .focus(let id): if let id { openTask(id) }
                             case .logged(let id): openTask(id)
+                            case .routine: break
                             }
                         }
                 }

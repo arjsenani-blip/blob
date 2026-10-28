@@ -82,3 +82,11 @@ test('reads and re-saves a real Mac data file unchanged', () => {
   const raw = fs.readFileSync(file, 'utf8');
   assert.deepStrictEqual(JSON.parse(encodeDoc(decodeDoc(raw))), JSON.parse(raw));
 });
+
+test('keeps routines (and other parts it does not edit) through decode, encode and merge', () => {
+  const routine = { id: 'R1', name: 'Bedtime routine', steps: [], anchor: 'end', time: 1350, weekdays: [], remind: true, updatedAt: 800000000, deleted: false };
+  const doc = decodeDoc(JSON.stringify({ schemaVersion: 1, events: [], tasks: [], plans: [], routines: [routine] }));
+  assert.deepEqual(JSON.parse(encodeDoc(doc)).routines, [routine]);
+  const other = decodeDoc(JSON.stringify({ schemaVersion: 1, events: [], tasks: [], plans: [], routines: [{ ...routine, id: 'R2' }] }));
+  assert.equal(merge(doc, other).extra.routines.length, 2);
+});

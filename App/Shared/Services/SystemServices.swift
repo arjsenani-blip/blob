@@ -82,7 +82,7 @@ enum Reminders {
     }
 
     @MainActor
-    static func reschedule(tasks: [BrainTask], blocks: [PlanBlock], events: [EventOccurrence], settings s: Settings) {
+    static func reschedule(tasks: [BrainTask], blocks: [PlanBlock], events: [EventOccurrence], routines: [DailyRoutine] = [], settings s: Settings) {
         let center = UNUserNotificationCenter.current()
         let now = Date()
         let cal = Calendar.current
@@ -144,6 +144,16 @@ enum Reminders {
                 if let e = evs.first { body.append("First up: \(e.title) at \(e.start.formatted(date: .omitted, time: .shortened))") }
                 add("digest-\(Int(day.timeIntervalSince1970))", at: at(s.digestHour, on: day),
                     title: "☀️ Today: \(dueThatDay.count) due · \(evs.count) event\(evs.count == 1 ? "" : "s")", body: body.joined(separator: "\n"))
+            }
+        }
+        // Routines: a nudge when each one starts, for the next few days.
+        for r in routines where r.remind && !r.deleted {
+            for offset in 0..<3 {
+                let day = cal.date(byAdding: .day, value: offset, to: cal.startOfDay(for: now))!
+                guard r.runs(on: day), let first = r.timeline(on: day).first else { continue }
+                let steps = r.steps.prefix(3).map(\.title).joined(separator: ", ")
+                add("routine-\(r.id)-\(offset)", at: first.start, title: "🌙 Time for your \(r.name.lowercased())",
+                    body: steps + (r.steps.count > 3 ? " and \(r.steps.count - 3) more" : "") + " · \(Scheduler.durationText(r.totalMinutes))")
             }
         }
         if s.events {

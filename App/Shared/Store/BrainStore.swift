@@ -248,6 +248,13 @@ final class BrainStore: ObservableObject {
         }
     }
 
+    func upsert(_ r: DailyRoutine) {
+        var r = r
+        r.updatedAt = Date()
+        if let i = doc.routines.firstIndex(where: { $0.id == r.id }) { doc.routines[i] = r } else { doc.routines.append(r) }
+        changed()
+    }
+
     func upsert(_ t: BrainTask) {
         var t = t
         t.updatedAt = Date()
@@ -541,7 +548,7 @@ final class BrainStore: ObservableObject {
     func rescheduleReminders() {
         guard !isTestData else { return }
         let range = DateInterval(start: Date(), duration: 7 * 86_400)
-        Reminders.reschedule(tasks: doc.tasks, blocks: todayPlan?.blocks ?? [], events: (eventAlertsOn || morningDigestOn) ? occurrences(in: range) : [],
+        Reminders.reschedule(tasks: doc.tasks, blocks: todayPlan?.blocks ?? [], events: (eventAlertsOn || morningDigestOn) ? occurrences(in: range) : [], routines: routines,
                              settings: .init(tasks: remindersOn, dueTodayHour: dueTodayHour, dueTomorrowHour: dueTomorrowHour,
                                              morningDigest: morningDigestOn, events: eventAlertsOn, eventLead: reminderLead))
     }

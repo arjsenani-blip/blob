@@ -25,6 +25,9 @@ public enum SyncMerger {
         out.plans = mergeRecords(local.plans, remote.plans)
             .filter { $0.checkInAt > planCutoff }
             .sorted { $0.checkInAt < $1.checkInAt }
+        out.routines = mergeRecords(local.routines, remote.routines)
+            .filter { !($0.deleted && $0.updatedAt < tombstoneCutoff) }
+            .sorted { ($0.startMinute, $0.id.uuidString) < ($1.startMinute, $1.id.uuidString) }
         out.settings = local.settings.updatedAt >= remote.settings.updatedAt ? local.settings : remote.settings
         return out
     }

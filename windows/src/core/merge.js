@@ -20,7 +20,17 @@ function merge(local, remote, now = new Date()) {
     tasks: mergeRecords(local.tasks, remote.tasks).filter(t => !(t.deleted && t.updatedAt < tomb)).sort(byIdThen(t => (t.due ? t.due.getTime() : 8.64e15))),
     plans: mergeRecords(local.plans, remote.plans).filter(p => p.checkInAt > planCut).sort((x, y) => x.checkInAt - y.checkInAt),
     settings: local.settings.updatedAt >= remote.settings.updatedAt ? local.settings : remote.settings,
+    extra: mergeExtra(local.extra || {}, remote.extra || {}),
   };
+}
+
+/** Untouched parts (routines from the Mac/iPhone): lists of records merge newest-wins by id, anything else prefers remote. */
+function mergeExtra(a, b) {
+  const out = { ...a, ...b };
+  for (const k of Object.keys(out)) {
+    if (Array.isArray(a[k]) && Array.isArray(b[k])) out[k] = mergeRecords(a[k], b[k]);
+  }
+  return out;
 }
 
 module.exports = { merge, mergeRecords };

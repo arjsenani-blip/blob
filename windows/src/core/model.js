@@ -82,6 +82,8 @@ function decodeDoc(json) {
     }),
     plans: (d.plans || []).map(p => { const r = dec(p, 'plan'); r.blocks = (p.blocks || []).map(b => dec(b, 'block')); return r; }),
     settings: d.settings ? dec(d.settings, 'settings') : defaultSettings(),
+    // Parts this app doesn't edit (e.g. routines from the Mac/iPhone) are kept exactly as they came.
+    extra: Object.fromEntries(Object.entries(d).filter(([k]) => !['schemaVersion', 'events', 'tasks', 'plans', 'settings'].includes(k))),
   };
 }
 
@@ -114,6 +116,7 @@ function encodeDoc(doc) {
     }),
     plans: doc.plans.map(p => { const r = enc(p, 'plan'); r.blocks = p.blocks.map(b => enc(b, 'block')); return r; }),
     settings: enc(doc.settings, 'settings'),
+    ...(doc.extra || {}),
   };
   return JSON.stringify(sortKeys(out));                  // sorted keys, like the Swift encoder
 }

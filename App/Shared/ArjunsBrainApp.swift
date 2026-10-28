@@ -121,6 +121,7 @@ struct RootView: View {
         switch tab {
         case .today: TodayX(tab: $tab, openSettings: { showSettings = true }, openSearch: { showSearch = true })
         case .calendar: CalendarX(openSettings: { showSettings = true }, openSearch: { showSearch = true })
+        case .routines: RoutinesScreen(openSettings: { showSettings = true }, openSearch: { showSearch = true })
         case .focus: FocusScreen()
         case .tasks:
             NavigationStack {

@@ -191,6 +191,7 @@ struct TodayX: View {
             if let t = id.flatMap({ store.task($0) }) { XInlineAction(title: "Start") { Pomodoro.shared.focus(on: t); tab = .focus } }
         case .event(_, let eventID):
             if let e = eventID.flatMap({ store.event($0) }) { XInlineAction(title: "Edit") { editEvent = e } }
+        case .routine: XInlineAction(title: "Open") { tab = .routines }
         case .note: EmptyView()
         }
     }
@@ -200,6 +201,7 @@ struct TodayX: View {
         case .task(let id): openTask = IDBox(id: id)
         case .event(_, let eventID): editEvent = eventID.flatMap { store.event($0) }
         case .focusBlock(let id): if let id { openTask = IDBox(id: id) }
+        case .routine: tab = .routines
         case .note: break
         }
     }

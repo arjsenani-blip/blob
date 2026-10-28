@@ -28,7 +28,11 @@
 	<string>Shows your calendar events alongside your plan so homework isn't scheduled on top of them, and adds Blob's events to a Blob calendar.</string>
 	<key>NSHumanReadableCopyright</key>
 	<string>Made for Arjun</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Lets you describe a routine out loud instead of typing it. The mic is only on while you dictate.</string>
 	<key>NSRemindersFullAccessUsageDescription</key>
 	<string>Puts your assignments in a Homework list so they show up as tasks in Calendar and Reminders, and marks them done when you tick them off there.</string>
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>Turns what you say into text so Blob can build your routine’s timeline. It runs on your device when possible.</string>
 </dict>
 </plist>

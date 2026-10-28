@@ -43,6 +43,8 @@ targets:
         NSRemindersFullAccessUsageDescription: Puts your assignments in a Homework list so they show up as tasks in Calendar and Reminders, and marks them done when you tick them off there.
         NSHumanReadableCopyright: Made for Arjun
         BlobGoogleClientID: "965051238264-tceojjpt96semh8q8car8kreik9do2jh.apps.googleusercontent.com"
+        NSMicrophoneUsageDescription: Lets you describe a routine out loud instead of typing it. The mic is only on while you dictate.
+        NSSpeechRecognitionUsageDescription: Turns what you say into text so Blob can build your routine’s timeline. It runs on your device when possible.
     settings:
       base:
         PRODUCT_NAME: ArjunsBrain
@@ -90,6 +92,8 @@ targets:
         NSRemindersFullAccessUsageDescription: Puts your assignments in a Homework list so they show up as tasks in Calendar and Reminders, and marks them done when you tick them off there.
         ITSAppUsesNonExemptEncryption: false
         BlobGoogleClientID: "965051238264-tceojjpt96semh8q8car8kreik9do2jh.apps.googleusercontent.com"
+        NSMicrophoneUsageDescription: Lets you describe a routine out loud instead of typing it. The mic is only on while you dictate.
+        NSSpeechRecognitionUsageDescription: Turns what you say into text so Blob can build your routine’s timeline. It runs on your device when possible.
     settings:
       base:
         PRODUCT_NAME: ArjunsBrain
