@@ -17,36 +17,61 @@ struct TodayX: View {
 
     private var feed: DayFeed { DayFeed(store: store, day: day) }
 
+    /// Type and spacing for the window's width: two columns when there's room, one column (smaller type)
+    /// in a medium window, phone sizes when narrow — and a smooth step within each, so text never gets crammed.
+    struct Metrics {
+        enum Layout { case twoColumn, oneColumn, phone }
+        var layout: Layout
+        var title: CGFloat, summary: CGFloat, row: CGFloat, meta: CGFloat, tile: CGFloat, label: CGFloat
+        var gap: CGFloat, padH: CGFloat, side: CGFloat
+
+        init(width w: CGFloat) {
+            if w >= 1180 {
+                let k = min(1, max(0, (w - 1180) / 320))
+                layout = .twoColumn
+                title = 36 + 8 * k; summary = 18 + 4 * k; row = 15 + 2 * k; meta = 13 + k; tile = 34 + 6 * k; label = 14 + k
+                gap = 18 + 4 * k; padH = 32 + 8 * k; side = 320 + 60 * k
+            } else if w >= 700 {
+                layout = .oneColumn
+                title = 34; summary = 17; row = 15; meta = 13; tile = 34; label = 14; gap = 16; padH = 28; side = 0
+            } else {
+                layout = .phone
+                title = 32; summary = 16; row = 15; meta = 13; tile = 34; label = 13; gap = 14; padH = 20; side = 0
+            }
+        }
+    }
+
     var body: some View {
         GeometryReader { geo in
-            let wide = geo.size.width > 900
+            let m = Metrics(width: geo.size.width)
             ScrollView {
-                VStack(alignment: .leading, spacing: wide ? 22 : 14) {
-                    header(wide: wide)
-                    Text(xRich(feed.summary, size: wide ? 22 : 17))
-                        .font(.system(size: wide ? 22 : 17, weight: .medium))
-                        .lineSpacing(wide ? 5 : 3)
+                VStack(alignment: .leading, spacing: m.gap) {
+                    header(m)
+                    if m.layout == .oneColumn { XAskBar() }
+                    Text(xRich(feed.summary, size: m.summary))
+                        .font(.system(size: m.summary, weight: .medium))
+                        .lineSpacing(m.summary * 0.22)
                         .foregroundStyle(X.body)
-                        .frame(maxWidth: 980, alignment: .leading)
+                        .frame(maxWidth: 900, alignment: .leading)
                         .fixedSize(horizontal: false, vertical: true)
                     chips
-                    if !wide, pomodoro.isActive { FocusStrip { tab = .focus } }
-                    if wide {
-                        HStack(alignment: .top, spacing: 40) {
-                            sections.frame(maxWidth: .infinity, alignment: .leading)
-                            VStack(spacing: 20) {
+                    if m.layout != .twoColumn, pomodoro.isActive { FocusStrip { tab = .focus } }
+                    if m.layout == .twoColumn {
+                        HStack(alignment: .top, spacing: m.padH) {
+                            sections(m).frame(maxWidth: .infinity, alignment: .leading)
+                            VStack(spacing: 18) {
                                 FocusCard { tab = .focus }
                                 ScheduleCard(day: day)
                                 MiniMonth(selected: $day)
                             }
-                            .frame(width: 380)
+                            .frame(width: m.side)
                         }
                     } else {
-                        sections
+                        sections(m)
                     }
                 }
-                .padding(.horizontal, wide ? 40 : 20)
-                .padding(.top, wide ? 28 : 16)
+                .padding(.horizontal, m.padH)
+                .padding(.top, m.layout == .twoColumn ? 26 : 16)
                 .padding(.bottom, 130)
                 .frame(maxWidth: 1360)
                 .frame(maxWidth: .infinity)
@@ -60,13 +85,15 @@ struct TodayX: View {
     // MARK: Header
 
     @ViewBuilder
-    private func header(wide: Bool) -> some View {
-        HStack(alignment: .center, spacing: 20) {
-            HStack(alignment: .firstTextBaseline, spacing: 14) {
-                Text(day.xDayTitle).font(wide ? X.titleFont : X.phoneTitleFont).tracking(wide ? -1.2 : -0.8).foregroundStyle(X.ink)
-                if wide {
+    private func header(_ m: Metrics) -> some View {
+        let wide = m.layout == .twoColumn
+        HStack(alignment: .center, spacing: 16) {
+            HStack(alignment: .firstTextBaseline, spacing: 12) {
+                Text(day.xDayTitle).font(.system(size: m.title, weight: .heavy)).tracking(-m.title * 0.026).foregroundStyle(X.ink)
+                    .lineLimit(1).fixedSize()
+                if m.layout != .phone {
                     Text(day.formatted(.dateTime.month(.wide)) + " · Week \(Calendar.current.component(.weekOfYear, from: day))")
-                        .font(.system(size: 16, weight: .medium)).foregroundStyle(X.muted)
+                        .font(.system(size: m.meta + 2, weight: .medium)).foregroundStyle(X.muted).lineLimit(1)
                 }
                 if !Calendar.current.isDateInToday(day) {
                     Button("Today") { withAnimation { day = Date() } }
@@ -76,7 +103,7 @@ struct TodayX: View {
                 }
             }
             Spacer(minLength: 12)
-            if wide { XAskBar().frame(maxWidth: 520) }
+            if wide { XAskBar().frame(minWidth: 260, maxWidth: 480) }
             XToolbarPill(onSearch: openSearch, onSettings: openSettings)
         }
     }
@@ -106,9 +133,9 @@ struct TodayX: View {
     // MARK: Feed
 
     @ViewBuilder
-    private var sections: some View {
+    private func sections(_ m: Metrics) -> some View {
         let list = feed.sections(filter: filter)
-        VStack(alignment: .leading, spacing: 24) {
+        VStack(alignment: .leading, spacing: m.gap + 4) {
             if list.isEmpty {
                 VStack(alignment: .leading, spacing: 8) {
                     XLabel(text: "All clear", tone: .today)
@@ -117,24 +144,33 @@ struct TodayX: View {
             }
             ForEach(Array(list.enumerated()), id: \.element.id) { i, s in
                 if i > 0 { Rectangle().fill(X.line).frame(height: 1) }
-                VStack(alignment: .leading, spacing: 14) {
-                    XLabel(text: s.title, tone: s.tone)
-                    ForEach(s.items) { item in row(item) }
+                VStack(alignment: .leading, spacing: m.gap - 2) {
+                    XLabel(text: s.title, tone: s.tone, size: m.label)
+                    ForEach(s.items) { item in row(item, m) }
                 }
             }
         }
     }
 
-    private func row(_ item: FeedItem) -> some View {
-        HStack(alignment: .top, spacing: 14) {
-            XTile(emoji: item.emoji, tone: item.tone)
+    private func row(_ item: FeedItem, _ m: Metrics) -> some View {
+        HStack(alignment: .top, spacing: 12) {
+            XTile(emoji: item.emoji, tone: item.tone, size: m.tile)
             VStack(alignment: .leading, spacing: 4) {
-                Text(xRich(item.sentence)).font(.system(size: 17)).foregroundStyle(X.ink)
+                Text(xRich(item.sentence, size: m.row)).font(.system(size: m.row)).foregroundStyle(X.ink)
+                    .lineSpacing(2)
                     .fixedSize(horizontal: false, vertical: true)
-                HStack(spacing: 14) {
-                    if !item.meta.isEmpty { Text(item.meta).font(.system(size: 14)).foregroundStyle(X.muted).lineLimit(1) }
-                    actions(item)
+                // Details and actions on one line when they fit, stacked when they don't.
+                ViewThatFits(in: .horizontal) {
+                    HStack(spacing: 12) {
+                        if !item.meta.isEmpty { Text(item.meta).font(.system(size: m.meta)).foregroundStyle(X.muted).lineLimit(1).fixedSize() }
+                        HStack(spacing: 12) { actions(item) }
+                    }
+                    VStack(alignment: .leading, spacing: 4) {
+                        if !item.meta.isEmpty { Text(item.meta).font(.system(size: m.meta)).foregroundStyle(X.muted).lineLimit(1) }
+                        HStack(spacing: 12) { actions(item) }
+                    }
                 }
+                .environment(\.xActionSize, m.meta + 1)
             }
             Spacer(minLength: 0)
         }

@@ -302,6 +302,10 @@ enum WindowSnapshot {
     static func runIfRequested(store: BrainStore, select: (XTab) -> Void) async {
         guard let prefix = UserDefaults.standard.string(forKey: "snapshot") else { return }
         if UserDefaults.standard.bool(forKey: "snapshotCheckIn") { store.checkIn() }
+        let w = UserDefaults.standard.double(forKey: "snapshotWidth"), h = UserDefaults.standard.double(forKey: "snapshotHeight")
+        if w > 0, let win = NSApplication.shared.windows.first(where: { $0.canBecomeMain }) {
+            win.setContentSize(NSSize(width: w, height: h > 0 ? h : 820))
+        }
         func shoot(_ name: String) {
             guard let view = NSApplication.shared.windows.first(where: { $0.canBecomeMain })?.contentView,
                   let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) else { return }

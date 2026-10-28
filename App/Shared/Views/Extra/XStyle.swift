@@ -67,10 +67,11 @@ enum X {
 struct XLabel: View {
     var text: String
     var tone: X.Tone
+    var size: CGFloat = 15
     var body: some View {
         Text(text)
-            .font(.system(size: 15, weight: .bold))
-            .padding(.horizontal, 12).padding(.vertical, 6)
+            .font(.system(size: size, weight: .bold))
+            .padding(.horizontal, size * 0.8).padding(.vertical, size * 0.4)
             .foregroundStyle(tone.text)
             .background(tone.fill, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
     }
@@ -108,12 +109,21 @@ struct XChip: View {
 }
 
 /// Underlined inline action, like Extra's "Book it" / "RSVP now".
+private struct XActionSizeKey: EnvironmentKey { static let defaultValue: CGFloat = 14 }
+extension EnvironmentValues {
+    var xActionSize: CGFloat {
+        get { self[XActionSizeKey.self] }
+        set { self[XActionSizeKey.self] = newValue }
+    }
+}
+
 struct XInlineAction: View {
     var title: String
     var action: () -> Void
+    @Environment(\.xActionSize) private var size
     var body: some View {
         Button(action: action) {
-            Text(title).font(.system(size: 14, weight: .semibold)).underline(true, pattern: .solid).foregroundStyle(X.ink)
+            Text(title).font(.system(size: size, weight: .semibold)).underline(true, pattern: .solid).foregroundStyle(X.ink)
         }
         .buttonStyle(.plain)
     }
@@ -172,7 +182,7 @@ struct XAskBar: View {
     var body: some View {
         HStack(spacing: 10) {
             Image(systemName: "plus").font(.system(size: 16, weight: .bold)).foregroundStyle(X.purple)
-            TextField("Add or log anything — “chem lab due thu ~90m”, “worked 30 min on stats”", text: $text)
+            TextField("Add or log anything — “chem lab due thu”", text: $text)
                 .textFieldStyle(.plain)
                 .font(.system(size: 15, weight: .medium))
                 .focused($focused)
