@@ -60,36 +60,106 @@ final class SystemCalendarBridge: ObservableObject {
     }
 }
 
-/// Local reminders: a heads-up before events and when each planned work block starts.
+/// Notifications on this device (Mac and iPhone each schedule their own):
+/// homework due tonight / tomorrow / within the hour, long-term steps due today, a morning summary,
+/// and planned focus blocks. Event alerts are off by default — your calendar app already sends those,
+/// and doubling them is what made notifications repeat. Blob's Pomodoro timer manages its own notification.
 enum Reminders {
+    struct Settings {
+        var tasks = true
+        var dueTodayHour = 16
+        var dueTomorrowHour = 19
+        var morningDigest = true
+        var digestHour = 7
+        var events = false
+        var eventLead = 10
+    }
+
+    static let prefix = "blob-"
+
     static func requestAuthorization() async -> Bool {
         (try? await UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge])) ?? false
     }
 
-    static func reschedule(events: [EventOccurrence], blocks: [PlanBlock], leadMinutes: Int) {
+    @MainActor
+    static func reschedule(tasks: [BrainTask], blocks: [PlanBlock], events: [EventOccurrence], settings s: Settings) {
         let center = UNUserNotificationCenter.current()
-        center.removeAllPendingNotificationRequests()
         let now = Date()
+        let cal = Calendar.current
         var requests: [UNNotificationRequest] = []
+        func add(_ id: String, at date: Date, title: String, body: String, urgent: Bool = false) {
+            guard date > now.addingTimeInterval(5) else { return }
+            let c = UNMutableNotificationContent()
+            c.title = title
+            c.body = body
+            c.sound = .default
+            c.threadIdentifier = "homework"
+            if urgent { c.interruptionLevel = .timeSensitive }
+            requests.append(request(id: prefix + id, at: date, content: c))
+        }
+        func at(_ hour: Int, on day: Date) -> Date { cal.date(bySettingHour: hour, minute: 0, second: 0, of: day)! }
 
-        for e in events where !e.isAllDay {
-            let fire = e.start.addingTimeInterval(-Double(leadMinutes) * 60)
-            guard fire > now else { continue }
-            let content = UNMutableNotificationContent()
-            content.title = e.title
-            content.body = "Starts at \(e.start.formatted(date: .omitted, time: .shortened))" + (e.location.map { " · \($0)" } ?? "")
-            content.sound = .default
-            requests.append(request(id: "event-\(e.id)", at: fire, content: content))
+        let open = tasks.filter { !$0.isCompleted && !$0.deleted }
+        if s.tasks {
+            for t in open {
+                guard let due = t.due, due > now, due < now.addingTimeInterval(14 * 86_400) else { continue }
+                let emoji = t.looksLikeSchoolwork ? "📚" : "✅"
+                let course = t.course.map { " (\($0))" } ?? ""
+                let left = t.remainingMinutes >= 20 ? " About \(Scheduler.durationText(t.remainingMinutes)) of work left." : ""
+                let dueDay = cal.startOfDay(for: due)
+                if AppleSync.isEndOfDay(due) {
+                    add("today-\(t.id)", at: at(s.dueTodayHour, on: dueDay), title: "\(emoji) Due tonight: \(t.title)", body: "Due by the end of today\(course).\(left)", urgent: true)
+                } else {
+                    add("hour-\(t.id)", at: due.addingTimeInterval(-3600), title: "\(emoji) Due in 1 hour: \(t.title)",
+                        body: "Due at \(due.formatted(date: .omitted, time: .shortened))\(course).\(left)", urgent: true)
+                    if cal.component(.hour, from: due) >= 12 {
+                        add("today-\(t.id)", at: at(min(s.dueTodayHour, cal.component(.hour, from: due) - 2), on: dueDay),
+                            title: "\(emoji) Due today: \(t.title)", body: "Due at \(due.formatted(date: .omitted, time: .shortened))\(course).\(left)")
+                    }
+                }
+                let dayBefore = cal.date(byAdding: .day, value: -1, to: dueDay)!
+                add("tomorrow-\(t.id)", at: at(s.dueTomorrowHour, on: dayBefore), title: "\(emoji) Due tomorrow: \(t.title)",
+                    body: (t.loggedMinutes > 0 ? "\(Int(t.progress * 100))% done." : "Not started yet.") + left + course)
+                // Long-term: each step on its day.
+                for m in t.milestones where !m.isDone {
+                    guard let md = m.due, md > now, cal.startOfDay(for: md) != dueDay else { continue }
+                    add("step-\(m.id)", at: at(s.dueTodayHour, on: cal.startOfDay(for: md)), title: "🧭 Step due today: \(m.title)",
+                        body: "For \(t.title). Keeps you on pace.")
+                }
+            }
+            // Planned focus blocks from your check-in.
+            for b in blocks where b.kind == .task && !b.isDone && b.start > now {
+                add("block-\(b.id)", at: b.start, title: "🍅 Time for: \(b.title)", body: [b.subtitle, "\(b.minutes) min"].compactMap { $0 }.joined(separator: " · "))
+            }
         }
-        for b in blocks where b.kind == .task && !b.isDone && b.start > now {
-            let content = UNMutableNotificationContent()
-            content.title = "Time for: \(b.title)"
-            content.body = [b.subtitle, "\(b.minutes) min"].compactMap { $0 }.joined(separator: " · ")
-            content.sound = .default
-            requests.append(request(id: "block-\(b.id)", at: b.start, content: content))
+        if s.morningDigest {
+            for offset in 0..<7 {
+                let day = cal.date(byAdding: .day, value: offset, to: cal.startOfDay(for: now))!
+                let next = cal.date(byAdding: .day, value: 1, to: day)!
+                let dueThatDay = open.filter { $0.due.map { $0 >= day && $0 < next } ?? false }
+                let evs = events.filter { !$0.isAllDay && $0.start >= day && $0.start < next }
+                guard !dueThatDay.isEmpty || !evs.isEmpty else { continue }
+                var body: [String] = []
+                if !dueThatDay.isEmpty { body.append("Due: " + dueThatDay.prefix(3).map(\.title).joined(separator: ", ") + (dueThatDay.count > 3 ? " +\(dueThatDay.count - 3)" : "")) }
+                if let e = evs.first { body.append("First up: \(e.title) at \(e.start.formatted(date: .omitted, time: .shortened))") }
+                add("digest-\(Int(day.timeIntervalSince1970))", at: at(s.digestHour, on: day),
+                    title: "☀️ Today: \(dueThatDay.count) due · \(evs.count) event\(evs.count == 1 ? "" : "s")", body: body.joined(separator: "\n"))
+            }
         }
-        // iOS allows 64 pending notifications.
-        for r in requests.sorted(by: { fireDate($0) < fireDate($1) }).prefix(60) { center.add(r) }
+        if s.events {
+            for e in events where !e.isAllDay {
+                add("event-\(e.id)", at: e.start.addingTimeInterval(-Double(s.eventLead) * 60), title: e.title,
+                    body: "Starts at \(e.start.formatted(date: .omitted, time: .shortened))" + (e.location.map { " · \($0)" } ?? ""))
+            }
+        }
+
+        // Replace only Blob's own scheduled notifications (older versions used other ids; clear those too).
+        center.getPendingNotificationRequests { pending in
+            let old = pending.map(\.identifier).filter { $0 != "pomodoro" && !$0.hasPrefix("buddy-timer") }
+            center.removePendingNotificationRequests(withIdentifiers: old)
+            // iOS keeps at most 64 pending; the soonest matter most.
+            for r in requests.sorted(by: { fireDate($0) < fireDate($1) }).prefix(58) { center.add(r) }
+        }
     }
 
     private static func request(id: String, at date: Date, content: UNNotificationContent) -> UNNotificationRequest {

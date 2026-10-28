@@ -100,15 +100,26 @@ struct SettingsScreen: View {
             AppleCalendarSection(systemCalendar: systemCalendar)
 
             Section {
-                Toggle("Reminders", isOn: Binding(
+                Toggle("Homework & task reminders", isOn: Binding(
                     get: { store.remindersOn },
                     set: { on in
                         store.remindersOn = on
-                        if on { Task { _ = await Reminders.requestAuthorization(); store.rescheduleReminders() } }
-                        else { Reminders.reschedule(events: [], blocks: [], leadMinutes: 0) }
+                        Task { _ = await Reminders.requestAuthorization(); store.rescheduleReminders() }
                     }))
                 if store.remindersOn {
-                    Stepper("Remind me \(store.reminderLead) min before events", value: $store.reminderLead, in: 0...120, step: 5)
+                    Picker("“Due tonight” reminder", selection: Binding(get: { store.dueTodayHour }, set: { store.dueTodayHour = $0; store.rescheduleReminders() })) {
+                        ForEach([12, 14, 15, 16, 17, 18, 19, 20], id: \.self) { h in Text(hourText(h)).tag(h) }
+                    }
+                    Picker("“Due tomorrow” reminder", selection: Binding(get: { store.dueTomorrowHour }, set: { store.dueTomorrowHour = $0; store.rescheduleReminders() })) {
+                        ForEach([17, 18, 19, 20, 21], id: \.self) { h in Text(hourText(h)).tag(h) }
+                    }
+                }
+                Toggle("Morning summary (7 AM)", isOn: Binding(get: { store.morningDigestOn }, set: { store.morningDigestOn = $0; store.rescheduleReminders() }))
+                Toggle("Also alert me before events", isOn: Binding(get: { store.eventAlertsOn }, set: { store.eventAlertsOn = $0; store.rescheduleReminders() }))
+                if store.eventAlertsOn {
+                    Stepper("\(store.reminderLead) min before", value: $store.reminderLead, in: 0...120, step: 5)
+                    Text("Your calendar app already alerts you for events — turning this on as well means two notifications per event.")
+                        .font(.caption).foregroundStyle(.orange)
                 }
             } header: {
                 Text("Notifications")

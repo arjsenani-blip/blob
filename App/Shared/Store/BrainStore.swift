@@ -28,8 +28,13 @@ final class BrainStore: ObservableObject {
 
     @AppStorage("displayName") var displayName = "Arjun"
     @AppStorage("useAppleCalendar") var useAppleCalendar = false
-    @AppStorage("remindersOn") var remindersOn = true
+    // Notifications (each device). Task reminders default on; event alerts default off (your calendar app sends those).
+    @AppStorage("taskRemindersOn") var remindersOn = true
+    @AppStorage("eventAlertsOn") var eventAlertsOn = false
     @AppStorage("reminderLead") var reminderLead = 10
+    @AppStorage("dueTodayHour") var dueTodayHour = 16
+    @AppStorage("dueTomorrowHour") var dueTomorrowHour = 19
+    @AppStorage("morningDigestOn") var morningDigestOn = true
     /// Assignments show up as tasks in Apple Calendar (through a "Blob" Reminders list).
     @AppStorage("appleTasksOn") var appleTasksOn = false
     @AppStorage("appleStepsOn") var appleStepsOn = true
@@ -102,7 +107,9 @@ final class BrainStore: ObservableObject {
 
     func onLaunch() async {
         repairAccidentalSteps()
-        if remindersOn { _ = await Reminders.requestAuthorization() }
+        _ = await Reminders.requestAuthorization()
+        Pomodoro.shared.store = self
+        Pomodoro.shared.catchUp()
         systemCalendar.onExternalChange = { [weak self] in
             guard let self, Date().timeIntervalSince(self.lastAppleWrite) > 3 else { return }
             self.scheduleAppleSync(after: 1.5)
@@ -532,10 +539,13 @@ final class BrainStore: ObservableObject {
     }
 
     func rescheduleReminders() {
-        guard remindersOn, !isTestData else { return }
-        let range = DateInterval(start: Date(), duration: 3 * 86_400)
-        Reminders.reschedule(events: occurrences(in: range), blocks: todayPlan?.blocks ?? [], leadMinutes: reminderLead)
+        guard !isTestData else { return }
+        let range = DateInterval(start: Date(), duration: 7 * 86_400)
+        Reminders.reschedule(tasks: doc.tasks, blocks: todayPlan?.blocks ?? [], events: (eventAlertsOn || morningDigestOn) ? occurrences(in: range) : [],
+                             settings: .init(tasks: remindersOn, dueTodayHour: dueTodayHour, dueTomorrowHour: dueTomorrowHour,
+                                             morningDigest: morningDigestOn, events: eventAlertsOn, eventLead: reminderLead))
     }
+
 }
 
 /// A small local log of background syncs (~/Library/Logs/Blob/sync.log), for figuring out sync problems.
