@@ -59,6 +59,7 @@ targets:
     sources:
       - App/Helper
       - App/Shared/Services/AppleSync.swift
+      - App/Shared/Services/DateCompat.swift
     dependencies:
       - package: BrainCore
     settings:

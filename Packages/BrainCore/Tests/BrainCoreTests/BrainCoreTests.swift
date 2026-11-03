@@ -1,5 +1,5 @@
 import XCTest
-@testable import BrainCore
+import BrainCore
 
 final class ParserTests: XCTestCase {
     var cal: Calendar = {
