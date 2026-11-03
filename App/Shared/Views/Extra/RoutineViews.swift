@@ -95,7 +95,7 @@ struct RoutinesScreen: View {
                         }
                     }
                 }
-                .padding(.horizontal, wide ? 36 : 20).padding(.top, wide ? 26 : 16).padding(.bottom, 130)
+                .padding(.horizontal, wide ? 36 : 20).padding(.top, wide ? 26 : 16).padding(.bottom, X.barClearance)
                 .frame(maxWidth: 1100).frame(maxWidth: .infinity)
             }
         }

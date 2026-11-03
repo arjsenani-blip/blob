@@ -132,7 +132,7 @@ struct FocusScreen: View {
                     stat(Scheduler.durationText(store.minutesThisWeek), "logged this week")
                 }
             }
-            .padding(.horizontal, 20).padding(.top, 20).padding(.bottom, 120)
+            .padding(.horizontal, 20).padding(.top, 20).padding(.bottom, X.barClearance - 10)
             .frame(maxWidth: 560)
             .frame(maxWidth: .infinity)
         }

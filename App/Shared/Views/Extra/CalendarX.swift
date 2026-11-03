@@ -364,7 +364,7 @@ struct WeekGridView: View {
                                 .overlay(alignment: .leading) { Rectangle().fill(X.line).frame(width: 1) }
                         }
                     }
-                    .padding(.bottom, 120)
+                    .padding(.bottom, X.barClearance - 10)
                 }
                 .onAppear { proxy.scrollTo("h\(max(firstHour, Calendar.current.component(.hour, from: Date()) - 2))", anchor: .top) }
             }
@@ -522,7 +522,7 @@ struct DayColumnView: View {
                         DayTimeline(day: day, hidden: hidden, compact: false, openTask: openTask, openEvent: openEvent)
                     }
                 }
-                .padding(.bottom, 130)
+                .padding(.bottom, X.barClearance)
             }
             .onAppear { proxy.scrollTo("d\(max(firstHour, Calendar.current.component(.hour, from: Date()) - 1))", anchor: .top) }
         }
@@ -586,7 +586,7 @@ struct MonthGridView: View {
                     }
                 }
             }
-            .padding(.bottom, 120)
+            .padding(.bottom, X.barClearance - 10)
         }
     }
 }
@@ -638,7 +638,7 @@ struct AgendaView: View {
                     }
                 }
             }
-            .padding(.bottom, 120)
+            .padding(.bottom, X.barClearance - 10)
         }
     }
 

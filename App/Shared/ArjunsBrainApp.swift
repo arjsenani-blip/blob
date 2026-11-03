@@ -80,13 +80,7 @@ struct RootView: View {
     @State private var showSearch = false
 
     var body: some View {
-        ZStack(alignment: .bottom) {
-            screen
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-            XTabBar(tab: $tab) { store.showAssistant = true }
-                .padding(.horizontal, 12)
-                .padding(.bottom, bottomInset)
-        }
+        shell
         .background(X.page.ignoresSafeArea())
         .sheet(isPresented: $store.showQuickAdd) { QuickAddSheet().environmentObject(store) }
         .sheet(isPresented: $store.showAssistant) { AssistantSheet().environmentObject(store) }
@@ -111,13 +105,28 @@ struct RootView: View {
         #endif
     }
 
-    private var bottomInset: CGFloat {
-        #if os(iOS)
-        6
+    /// The Mac's bar is a rail down the right edge, clear of the Dock, and the content makes room for it;
+    /// the iPhone's floats along the bottom.
+    @ViewBuilder
+    private var shell: some View {
+        #if os(macOS)
+        HStack(spacing: 0) {
+            screen
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            XTabBar(tab: $tab) { store.showAssistant = true }
+                .padding(.trailing, 14).padding(.leading, 4)
+        }
         #else
-        22
+        ZStack(alignment: .bottom) {
+            screen
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            XTabBar(tab: $tab) { store.showAssistant = true }
+                .padding(.horizontal, 12)
+                .padding(.bottom, 6)
+        }
         #endif
     }
+
 
     @ViewBuilder
     private var screen: some View {
@@ -130,15 +139,15 @@ struct RootView: View {
             NavigationStack {
                 TasksScreen(school: store.school)
                     .scrollContentBackground(.hidden)
-                    .safeAreaInset(edge: .bottom) { Color.clear.frame(height: 90) }
+                    .safeAreaInset(edge: .bottom) { Color.clear.frame(height: max(0, X.barClearance - 40)) }
                     #if os(iOS)
-                    .toolbar { ToolbarItem(placement: .topBarLeading) { NavigationLink("Activity") { ActivityScreen().safeAreaInset(edge: .bottom) { Color.clear.frame(height: 90) } } } }
+                    .toolbar { ToolbarItem(placement: .topBarLeading) { NavigationLink("Activity") { ActivityScreen().safeAreaInset(edge: .bottom) { Color.clear.frame(height: max(0, X.barClearance - 40)) } } } }
                     #endif
             }
         case .activity:
             NavigationStack {
                 ActivityScreen().scrollContentBackground(.hidden)
-                    .safeAreaInset(edge: .bottom) { Color.clear.frame(height: 90) }
+                    .safeAreaInset(edge: .bottom) { Color.clear.frame(height: max(0, X.barClearance - 40)) }
             }
         }
     }

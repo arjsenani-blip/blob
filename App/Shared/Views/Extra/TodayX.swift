@@ -72,7 +72,7 @@ struct TodayX: View {
                 }
                 .padding(.horizontal, m.padH)
                 .padding(.top, m.layout == .twoColumn ? 26 : 16)
-                .padding(.bottom, 130)
+                .padding(.bottom, X.barClearance)
                 .frame(maxWidth: 1360)
                 .frame(maxWidth: .infinity)
             }

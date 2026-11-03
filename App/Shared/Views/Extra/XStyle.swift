@@ -21,6 +21,14 @@ enum X {
         AccentChoice.current == .violet ? Color(adaptive: (0.949, 0.933, 0.988), dark: (0.20, 0.16, 0.30)) : AccentChoice.current.color.opacity(0.14)
     }
     static let now = Color(red: 0.898, green: 0.282, blue: 0.302)
+    /// Room to leave under scrolling content for the tab bar: it floats along the bottom on the iPhone, beside it on the Mac.
+    static var barClearance: CGFloat {
+        #if os(iOS)
+        130
+        #else
+        32
+        #endif
+    }
 
     /// The pastel section labels and their tiles.
     enum Tone: CaseIterable {
@@ -255,28 +263,41 @@ struct XTabBar: View {
     var onAdd: () -> Void
     @ObservedObject private var pomodoro = Pomodoro.shared
 
+    /// The Mac shows the bar as a rail down the right edge (the bottom is where the Dock lives); the iPhone along the bottom.
+    var vertical: Bool {
+        #if os(macOS)
+        true
+        #else
+        false
+        #endif
+    }
+
     var body: some View {
         let tabs = XTab.visible
         let half = (tabs.count + 1) / 2
-        HStack(spacing: compact ? 0 : 4) {
+        let layout = vertical ? AnyLayout(VStackLayout(spacing: 6)) : AnyLayout(HStackLayout(spacing: compact ? 0 : 4))
+        layout {
             ForEach(tabs.prefix(half)) { tabButton($0) }
-            Button(action: onAdd) {
-                Image(systemName: "plus").font(.system(size: 24, weight: .bold)).foregroundStyle(.white)
-                    .frame(width: 54, height: 54)
-                    .background(X.purple, in: Circle())
-                    .shadow(color: X.purple.opacity(0.4), radius: 10, y: 6)
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel("Ask Blob")
-            .help("Ask Blob — add, move or change anything")
-            .padding(.horizontal, compact ? 4 : 8)
+            addButton.padding(vertical ? .vertical : .horizontal, compact ? 4 : 6)
             ForEach(tabs.dropFirst(half)) { tabButton($0) }
         }
-        .padding(.horizontal, compact ? 10 : 12).padding(.vertical, 6)
-        .background(.ultraThinMaterial, in: Capsule())
-        .background(X.raised.opacity(0.75), in: Capsule())
-        .overlay(Capsule().strokeBorder(X.line, lineWidth: 1))
+        .padding(.horizontal, vertical ? 6 : (compact ? 10 : 12)).padding(.vertical, vertical ? 10 : 6)
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 34, style: .continuous))
+        .background(X.raised.opacity(0.75), in: RoundedRectangle(cornerRadius: 34, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 34, style: .continuous).strokeBorder(X.line, lineWidth: 1))
         .shadow(color: .black.opacity(0.14), radius: 20, y: 10)
+    }
+
+    private var addButton: some View {
+        Button(action: onAdd) {
+            Image(systemName: "plus").font(.system(size: 24, weight: .bold)).foregroundStyle(.white)
+                .frame(width: 54, height: 54)
+                .background(X.purple, in: Circle())
+                .shadow(color: X.purple.opacity(0.4), radius: 10, y: 6)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Ask Blob")
+        .help("Ask Blob — add, move or change anything")
     }
 
     private func tabButton(_ t: XTab) -> some View {
@@ -288,15 +309,17 @@ struct XTabBar: View {
                         Circle().fill(X.purple).frame(width: 8, height: 8).offset(x: 3, y: -1)
                     }
                 }
-                Text(compact ? t.shortTitle : t.title)
+                Text(compact || vertical ? t.shortTitle : t.title)
                     .font(.system(size: compact ? 11 : 13, weight: tab == t ? .bold : .semibold))
                     .foregroundStyle(tab == t ? X.ink : X.muted)
             }
-            .padding(.horizontal, compact ? 8 : 16).padding(.vertical, 5)
-            .background(tab == t ? X.purpleSoft : .clear, in: Capsule())
-            .contentShape(Capsule())
+            .frame(width: vertical ? 78 : nil)
+            .padding(.horizontal, vertical ? 0 : (compact ? 8 : 16)).padding(.vertical, vertical ? 7 : 5)
+            .background(tab == t ? X.purpleSoft : .clear, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+            .contentShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
         }
         .buttonStyle(.plain)
+        .help(t.title)
         .accessibilityLabel(t.title)
         .accessibilityAddTraits(tab == t ? .isSelected : [])
         .frame(maxWidth: compact ? .infinity : nil)
