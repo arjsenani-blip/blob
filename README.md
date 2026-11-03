@@ -1,6 +1,34 @@
-# Blob
+<p align="center">
+  <img src="docs/icon.png" alt="Blob" width="168" />
+</p>
 
-Blob is an **assignment log** for Mac and iPhone: track every assignment, log the time you spend and what you got done, and keep it all in sync with **TickTick** and **Google Calendar**. It's a native SwiftUI app; both devices share the same code and data.
+<h1 align="center">Blob</h1>
+
+<p align="center">
+  <b>An assignment log for Mac and iPhone: track every assignment, log the time you spend and what you got done, and keep it all in sync with TickTick and Google Calendar.</b>
+</p>
+
+<p align="center">
+  <img src="https://img.shields.io/badge/SwiftUI-native-7B3FF7?style=flat" alt="SwiftUI" />
+  <img src="https://img.shields.io/badge/platforms-macOS%20·%20iOS%20·%20Windows-4B1FB8?style=flat" alt="macOS, iOS and Windows" />
+  <img src="https://img.shields.io/badge/version-2.0-A78BFA?style=flat" alt="Version 2.0" />
+  <img src="https://img.shields.io/badge/unit%20tests-61-2DD4BF?style=flat" alt="61 unit tests" />
+</p>
+
+<p align="center">
+  <a href="#what-it-does">What it does</a> ·
+  <a href="#1-install-on-your-mac">Install</a> ·
+  <a href="#connecting-ticktick">TickTick</a> ·
+  <a href="#google-calendar">Google Calendar</a> ·
+  <a href="#project-layout">Project layout</a> ·
+  <a href="https://github.com/arjsenani-blip/blob/releases/latest">Latest release</a>
+</p>
+
+<p align="center">
+  <img src="docs/banner.jpg" alt="Blob: assignment log for Mac, iPhone and Windows" />
+</p>
+
+Blob is a native SwiftUI app; the Mac and iPhone share the same code and data.
 
 > 2.0 dropped the voice assistant (the corner blob, voice, screen control and self-updates). Everything else got rebuilt around logging, with a new look.
 
